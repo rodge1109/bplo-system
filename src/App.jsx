@@ -1,5 +1,13 @@
 import React, { useState, createContext, useContext, useEffect } from 'react';
-import { ShoppingCart, Plus, Minus, Trash2, ChevronRight, Check, X, Search } from 'lucide-react';
+import { ShoppingCart, Plus, Minus, Trash2, ChevronRight, Check, X, Search, LogOut, Edit3, RefreshCw, CheckCircle2, AlertCircle } from 'lucide-react';
+import { supabase } from './supabaseClient';
+import { TENANTS } from './constants/tenants';
+import AuthScreen from './components/auth/AuthScreen';
+import AppNavbar from './components/layout/AppNavbar';
+import ArtaDocumentUpload from './components/documents/ArtaDocumentUpload';
+import AcknowledgementReceiptModal from './components/documents/AcknowledgementReceiptModal';
+import ApplicationTracker from './components/documents/ApplicationTracker';
+import AdminEvaluationDashboard from './components/admin/AdminEvaluationDashboard';
 
 // Cart Context
 const CartContext = createContext();
@@ -46,6 +54,95 @@ const categories = ['All', 'Pizza', 'Burgers', 'Pasta', 'Salads', 'Drinks', 'Des
 
 // Main App Component
 export default function RestaurantApp() {
+  // Multi-Tenant state for Navigation Bar & Application
+  const [selectedTenantCode, setSelectedTenantCode] = useState('BOGO');
+  const activeTenant = TENANTS.find(t => t.code === selectedTenantCode) || TENANTS[0];
+  // Authentication state (gate before main page)
+  const [currentUser, setCurrentUser] = useState(() => {
+    try {
+      const saved = localStorage.getItem('bplo_currentUser');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
+
+  // Application Tracker and e-AR Receipt state
+  const [trackerOpen, setTrackerOpen] = useState(false);
+  const [trackerInitialRef, setTrackerInitialRef] = useState('');
+  const [activeReceiptData, setActiveReceiptData] = useState(null);
+  const [editingApplication, setEditingApplication] = useState(null);
+
+  const handleEditApplication = (appData) => {
+    setEditingApplication(appData);
+    setTrackerOpen(false);
+    setActiveReceiptData(null);
+    setViewMode('applicant');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Role-based View Mode: 'applicant' or 'admin'
+  const [viewMode, setViewMode] = useState(() => {
+    return currentUser?.role === 'admin' ? 'admin' : 'applicant';
+  });
+
+  useEffect(() => {
+    if (currentUser?.role === 'admin') {
+      setViewMode('admin');
+    } else {
+      setViewMode('applicant');
+    }
+  }, [currentUser]);
+
+  // Supabase session listener
+  useEffect(() => {
+    const initAuth = async () => {
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user) {
+          const userObj = {
+            id: session.user.id,
+            email: session.user.email,
+            fullName: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+            role: session.user.user_metadata?.role || 'applicant',
+          };
+          setCurrentUser(userObj);
+          localStorage.setItem('bplo_currentUser', JSON.stringify(userObj));
+        }
+      } catch (err) {
+        console.warn('Auth check notice:', err);
+      }
+    };
+
+    initAuth();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        const userObj = {
+          id: session.user.id,
+          email: session.user.email,
+          fullName: session.user.user_metadata?.full_name || session.user.email?.split('@')[0],
+          role: session.user.user_metadata?.role || 'applicant',
+        };
+        setCurrentUser(userObj);
+        localStorage.setItem('bplo_currentUser', JSON.stringify(userObj));
+      }
+    });
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, []);
+
+  const handleLogout = async () => {
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.warn(e);
+    }
+    setCurrentUser(null);
+    localStorage.removeItem('bplo_currentUser');
+  };
   const [cartItems, setCartItems] = useState([]);
   const [currentPage, setCurrentPage] = useState('home');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -218,177 +315,145 @@ export default function RestaurantApp() {
     getTotalPrice
   };
 
+  // Gate: Show Login / Sign Up screen if not authenticated
+  if (!currentUser) {
+    return (
+      <div className="min-h-screen bg-[#FAFAF8] flex flex-col font-['Poppins',sans-serif]">
+        <AppNavbar
+          activeTenant={activeTenant}
+          selectedTenantCode={selectedTenantCode}
+          onTenantChange={setSelectedTenantCode}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+          onOpenTracker={() => setTrackerOpen(prev => !prev)}
+          isTrackerActive={trackerOpen}
+          onQuickStaffLogin={() => {
+            const adminUser = {
+              id: 'demo-admin',
+              email: 'admin@bogo.gov.ph',
+              fullName: 'LGU BPLO Administrator',
+              role: 'admin',
+              isDemo: true
+            };
+            setCurrentUser(adminUser);
+            setViewMode('admin');
+            try {
+              localStorage.setItem('bplo_currentUser', JSON.stringify(adminUser));
+            } catch (e) {
+              console.warn(e);
+            }
+          }}
+        />
+        <main className="flex-1 py-4 px-2 sm:px-4 flex flex-col">
+          {trackerOpen ? (
+            <ApplicationTracker
+              initialReferenceNo={trackerInitialRef}
+              onClose={() => {
+                setTrackerOpen(false);
+                setTrackerInitialRef('');
+              }}
+              onViewReceipt={(data) => setActiveReceiptData(data)}
+              onEditApplication={handleEditApplication}
+              activeTenant={activeTenant}
+            />
+          ) : (
+            <div className="flex-1 flex items-center justify-center">
+              <AuthScreen
+                onLoginSuccess={(user) => {
+                  setCurrentUser(user);
+                  try {
+                    localStorage.setItem('bplo_currentUser', JSON.stringify(user));
+                  } catch (e) {
+                    console.warn(e);
+                  }
+                }}
+              />
+            </div>
+          )}
+        </main>
+
+        {/* Global Acknowledgement Receipt Modal */}
+        {activeReceiptData && (
+          <AcknowledgementReceiptModal
+            receiptData={activeReceiptData}
+            onClose={() => setActiveReceiptData(null)}
+            onOpenTracker={(ref) => {
+              setTrackerInitialRef(ref);
+              setTrackerOpen(true);
+            }}
+            onEditApplication={handleEditApplication}
+            activeTenant={activeTenant}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <CartContext.Provider value={contextValue}>
-      <style>{`
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-            transform: translateY(20px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-        .animate-fadeIn {
-          animation: fadeIn 0.8s ease-out forwards;
-        }
-        /* Hide scrollbar for category filter */
-        .scrollbar-hide {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-        }
-        .scrollbar-hide::-webkit-scrollbar {
-          display: none;
-        }
-        /* Boston Celtics Green Color Override */
-        .bg-green-600 {
-          background-color: #007A33 !important;
-        }
-        .bg-green-500 {
-          background-color: #008C3C !important;
-        }
-        .bg-green-700 {
-          background-color: #006129 !important;
-        }
-        .bg-green-400 {
-          background-color: #00A34A !important;
-        }
-        .bg-green-100 {
-          background-color: #E6F4EC !important;
-        }
-        .text-green-600 {
-          color: #007A33 !important;
-        }
-        .text-green-400 {
-          color: #00A34A !important;
-        }
-        .text-green-100 {
-          color: #E6F4EC !important;
-        }
-        .text-green-700 {
-          color: #006129 !important;
-        }
-        .border-green-600 {
-          border-color: #007A33 !important;
-        }
-        .border-green-300 {
-          border-color: #66C299 !important;
-        }
-        .border-green-400 {
-          border-color: #00A34A !important;
-        }
-        .border-green-500 {
-          border-color: #008C3C !important;
-        }
-        .hover\\:bg-green-700:hover {
-          background-color: #006129 !important;
-        }
-        .hover\\:bg-green-500:hover {
-          background-color: #008C3C !important;
-        }
-        .hover\\:text-green-600:hover {
-          color: #007A33 !important;
-        }
-        .hover\\:bg-green-100:hover {
-          background-color: #E6F4EC !important;
-        }
-        .from-green-900 {
-          --tw-gradient-from: #004D20 !important;
-        }
-        .to-green-900 {
-          --tw-gradient-to: #004D20 !important;
-        }
-        .via-green-900 {
-          --tw-gradient-via: #004D20 !important;
-        }
-        .from-green-400 {
-          --tw-gradient-from: #00A34A !important;
-        }
-        .to-green-500 {
-          --tw-gradient-to: #008C3C !important;
-        }
-      `}</style>
-      <div className="min-h-screen bg-gradient-to-br from-gray-900 via-green-900 to-gray-900 pb-16 md:pb-0 pt-[140px] md:pt-[100px]">
-        <Header
-          currentPage={currentPage}
-          setCurrentPage={setCurrentPage}
-          setShowCart={setShowCart}
-          searchQuery={searchQuery}
-          setSearchQuery={setSearchQuery}
+      <div className="min-h-screen bg-slate-50 flex flex-col font-['Poppins',sans-serif]">
+        <AppNavbar
+          activeTenant={activeTenant}
+          selectedTenantCode={selectedTenantCode}
+          onTenantChange={setSelectedTenantCode}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+          onOpenTracker={() => setTrackerOpen(prev => !prev)}
+          isTrackerActive={trackerOpen}
+          viewMode={viewMode}
+          onToggleViewMode={() => {
+            setTrackerOpen(false);
+            setViewMode(v => v === 'admin' ? 'applicant' : 'admin');
+          }}
         />
-        {currentPage === 'home' && (
-          <HomePage
-            setCurrentPage={setCurrentPage}
-            menuData={menuData}
-            isLoading={isLoadingProducts}
-          />
-        )}
-        {currentPage === 'menu' && (
-          <MenuPage
-            selectedCategory={selectedCategory}
-            setSelectedCategory={setSelectedCategory}
-            searchQuery={searchQuery}
-            menuData={menuData}
-            isLoading={isLoadingProducts}
-          />
-        )}
-        {currentPage === 'cart' && <CartPage setCurrentPage={setCurrentPage} />}
-        {currentPage === 'checkout' && <CheckoutPage setCurrentPage={setCurrentPage} clearCart={clearCart} />}
-        {currentPage === 'confirmation' && <ConfirmationPage setCurrentPage={setCurrentPage} orderNumber={pendingOrderNumber} paymentStatus={paymentStatus} />}
-        {currentPage === 'payment-failed' && <PaymentFailedPage setCurrentPage={setCurrentPage} orderNumber={pendingOrderNumber} />}
-        {showCart && <CartDrawer setShowCart={setShowCart} setCurrentPage={setCurrentPage} />}
-        {showSizeModal && selectedProduct && (
-          <SizeModal
-            product={selectedProduct}
-            onClose={() => {
-              console.log('Closing size modal');
-              setShowSizeModal(false);
-              setSelectedProduct(null);
-            }}
-            onSelectSize={(size) => {
-              console.log('Size selected:', size);
-              addToCart(selectedProduct, size);
-            }}
-          />
-        )}
+        <main className="flex-1 py-4 px-2 sm:px-4">
+          {trackerOpen ? (
+            <ApplicationTracker
+              initialReferenceNo={trackerInitialRef}
+              onClose={() => {
+                setTrackerOpen(false);
+                setTrackerInitialRef('');
+              }}
+              onViewReceipt={(data) => setActiveReceiptData(data)}
+              onEditApplication={handleEditApplication}
+              activeTenant={activeTenant}
+              isEvaluationAdmin={viewMode === 'admin'}
+            />
+          ) : viewMode === 'admin' ? (
+            <AdminEvaluationDashboard
+              currentUser={currentUser}
+              activeTenant={activeTenant}
+              onSwitchToApplicantView={() => setViewMode('applicant')}
+            />
+          ) : (
+            <BusinessPermitForm
+              currentUser={currentUser}
+              onLogout={handleLogout}
+              selectedTenantCode={selectedTenantCode}
+              setSelectedTenantCode={setSelectedTenantCode}
+              onSubmissionSuccess={(receipt) => {
+                setActiveReceiptData(receipt);
+                setEditingApplication(null);
+              }}
+              editingApplication={editingApplication}
+              onCancelEdit={() => setEditingApplication(null)}
+            />
+          )}
+        </main>
 
-        {/* Mobile Bottom Navigation */}
-        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 md:hidden z-50 pb-safe">
-          <div className="flex justify-around items-center py-2">
-            <button
-              onClick={() => setCurrentPage('home')}
-              className={`flex flex-col items-center px-4 py-1 ${currentPage === 'home' ? 'text-green-600' : 'text-gray-500'}`}
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
-              </svg>
-              <span className="text-xs font-medium">Home</span>
-            </button>
-            <button
-              onClick={() => setCurrentPage('menu')}
-              className={`flex flex-col items-center px-4 py-1 ${currentPage === 'menu' ? 'text-green-600' : 'text-gray-500'}`}
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-              <span className="text-xs font-medium">Menu</span>
-            </button>
-            <button
-              onClick={() => setShowCart(true)}
-              className={`flex flex-col items-center px-4 py-1 relative ${showCart ? 'text-green-600' : 'text-gray-500'}`}
-            >
-              <ShoppingCart className="w-6 h-6" />
-              {getTotalItems() > 0 && (
-                <span className="absolute -top-1 right-2 bg-green-600 text-white text-xs w-5 h-5 rounded-full flex items-center justify-center font-bold">
-                  {getTotalItems()}
-                </span>
-              )}
-              <span className="text-xs font-medium">Cart</span>
-            </button>
-          </div>
-        </nav>
+        {/* Global Acknowledgement Receipt Modal */}
+        {activeReceiptData && (
+          <AcknowledgementReceiptModal
+            receiptData={activeReceiptData}
+            onClose={() => setActiveReceiptData(null)}
+            onOpenTracker={(ref) => {
+              setTrackerInitialRef(ref);
+              setTrackerOpen(true);
+            }}
+            onEditApplication={handleEditApplication}
+            activeTenant={activeTenant}
+          />
+        )}
       </div>
     </CartContext.Provider>
   );
@@ -1716,4 +1781,1238 @@ function PaymentFailedPage({ setCurrentPage, orderNumber }) {
       </div>
     </div>
   );
+}
+
+
+
+
+const getInitialFormData = () => ({
+  applicationType: 'New',
+  amendmentType: '',
+  modeOfPayment: 'Annually',
+  transferLocation: false,
+  businessStartDate: '',
+  dateOfApplication: new Date().toISOString().split('T')[0],
+  referenceNo: '',
+  dtiSecCdaRegNo: '',
+  dtiSecCdaRegDate: '',
+  typeOfOrganization: 'Single',
+  tinNo: '',
+  ctcNo: '',
+  hasTaxIncentive: false,
+  taxIncentiveEntity: '',
+  taxpayerLastName: '',
+  taxpayerFirstName: '',
+  taxpayerMiddleName: '',
+  businessName: '',
+  tradeNameFranchise: '',
+  corpPresidentLastName: '',
+  corpPresidentFirstName: '',
+  corpPresidentMiddleName: '',
+  busHouseBldgNo: '',
+  busBuildingName: '',
+  busStreet: '',
+  busBarangay: '',
+  busSubdivisionLandmark: '',
+  busCityMunicipality: 'City of Bogo',
+  busProvince: 'Cebu',
+  busTelephoneNo: '',
+  busEmailAddress: '',
+  sameAsBusinessAddress: false,
+  ownerHouseBldgNo: '',
+  ownerBuildingName: '',
+  ownerStreet: '',
+  ownerBarangay: '',
+  ownerSubdivisionLandmark: '',
+  ownerCityMunicipality: '',
+  ownerProvince: '',
+  ownerTelephoneNo: '',
+  ownerEmailAddress: '',
+  numEmployeesMale: 0,
+  numEmployeesFemale: 0,
+  numEmployeesBogoResiding: 0,
+  isRented: false,
+  isMarketStall: false,
+  isFranchisee: false,
+  isRepresentative: false,
+  representativeName: '',
+  representativePosition: '',
+  specialBusinessTypes: [],
+  lessorName: '',
+  monthlyRental: '',
+  lessorAddress: '',
+  lessorContactNo: '',
+  lessorEmailAddress: '',
+  emergencyContactPerson: '',
+  emergencyContactNo: '',
+  emergencyEmailAddress: '',
+  businessActivities: [{ code: '', lineOfBusiness: '', noOfUnits: '', capitalization: '', grossEssential: '', grossNonEssential: '' }],
+  uploadedDocuments: {},
+  applicantSignatureName: ''
+});
+
+export function mapApplicationToFormData(app) {
+  if (!app) return getInitialFormData();
+
+  const val = (snake, camel, fallback = '') => {
+    if (app[camel] !== undefined && app[camel] !== null) return app[camel];
+    if (app[snake] !== undefined && app[snake] !== null) return app[snake];
+    return fallback;
+  };
+
+  // Map business activities
+  let activities = [];
+  if (Array.isArray(app.business_activities) && app.business_activities.length > 0) {
+    activities = app.business_activities.map(a => ({
+      code: a.code || '',
+      lineOfBusiness: a.line_of_business || a.lineOfBusiness || '',
+      noOfUnits: a.no_of_units || a.noOfUnits || '',
+      capitalization: a.capitalization || '',
+      grossEssential: a.gross_essential || a.grossEssential || '',
+      grossNonEssential: a.gross_non_essential || a.grossNonEssential || ''
+    }));
+  } else if (Array.isArray(app.businessActivities) && app.businessActivities.length > 0) {
+    activities = app.businessActivities;
+  } else {
+    activities = [{ code: '', lineOfBusiness: '', noOfUnits: '', capitalization: '', grossEssential: '', grossNonEssential: '' }];
+  }
+
+  // Map documents
+  let uploadedDocs = {};
+  const rawDocs = app.documents || app.uploaded_documents || app.uploadedDocuments || [];
+  if (Array.isArray(rawDocs)) {
+    rawDocs.forEach((d, idx) => {
+      const key = d.docId || d.id || `doc_${idx}`;
+      uploadedDocs[key] = d;
+    });
+  } else if (rawDocs && typeof rawDocs === 'object') {
+    uploadedDocs = rawDocs;
+  }
+
+  const refNo = val('reference_no', 'referenceNo', '');
+  if (Object.keys(uploadedDocs).length === 0 && refNo) {
+    try {
+      const stored = localStorage.getItem(`bplo_docs_${refNo}`);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          parsed.forEach((d, idx) => {
+            uploadedDocs[d.docId || d.id || `doc_${idx}`] = d;
+          });
+        }
+      }
+    } catch(e) {}
+  }
+
+  return {
+    referenceNo: refNo,
+    applicationType: val('application_type', 'applicationType', 'New'),
+    amendmentType: val('amendment_type', 'amendmentType', ''),
+    modeOfPayment: val('mode_of_payment', 'modeOfPayment', 'Annually'),
+    transferLocation: Boolean(val('transfer_location', 'transferLocation', false)),
+    businessStartDate: val('business_start_date', 'businessStartDate', ''),
+    dateOfApplication: val('date_of_application', 'dateOfApplication', new Date().toISOString().split('T')[0]),
+    dtiSecCdaRegNo: val('dti_sec_cda_reg_no', 'dtiSecCdaRegNo', ''),
+    dtiSecCdaRegDate: val('dti_sec_cda_reg_date', 'dtiSecCdaRegDate', ''),
+    typeOfOrganization: val('type_of_organization', 'typeOfOrganization', 'Single'),
+    tinNo: val('tin_no', 'tinNo', ''),
+    hasTaxIncentive: Boolean(val('has_tax_incentive', 'hasTaxIncentive', false)),
+    taxIncentiveEntity: val('tax_incentive_entity', 'taxIncentiveEntity', ''),
+    ctcNo: val('ctc_no', 'ctcNo', ''),
+    taxpayerLastName: val('taxpayer_last_name', 'taxpayerLastName', ''),
+    taxpayerFirstName: val('taxpayer_first_name', 'taxpayerFirstName', ''),
+    taxpayerMiddleName: val('taxpayer_middle_name', 'taxpayerMiddleName', ''),
+    businessName: val('business_name', 'businessName', ''),
+    tradeNameFranchise: val('trade_name_franchise', 'tradeNameFranchise', ''),
+    corpPresidentLastName: val('corp_president_treasurer_last_name', 'corpPresidentLastName', ''),
+    corpPresidentFirstName: val('corp_president_treasurer_first_name', 'corpPresidentFirstName', ''),
+    corpPresidentMiddleName: val('corp_president_treasurer_middle_name', 'corpPresidentMiddleName', ''),
+    busHouseBldgNo: val('bus_house_bldg_no', 'busHouseBldgNo', ''),
+    busBuildingName: val('bus_building_name', 'busBuildingName', ''),
+    busLotNo: val('bus_lot_no', 'busLotNo', ''),
+    busBlockNo: val('bus_block_no', 'busBlockNo', ''),
+    busStreet: val('bus_street', 'busStreet', ''),
+    busBarangay: val('bus_barangay', 'busBarangay', ''),
+    busSubdivisionLandmark: val('bus_subdivision_landmark', 'busSubdivisionLandmark', ''),
+    busCityMunicipality: val('bus_city_municipality', 'busCityMunicipality', 'City of Bogo'),
+    busProvince: val('bus_province', 'busProvince', 'Cebu'),
+    busZipCode: val('bus_zip_code', 'busZipCode', ''),
+    busTelephoneNo: val('bus_telephone_no', 'busTelephoneNo', ''),
+    busMobileNo: val('bus_mobile_no', 'busMobileNo', ''),
+    busEmailAddress: val('bus_email_address', 'busEmailAddress', ''),
+    sameAsBusinessAddress: false,
+    ownerHouseBldgNo: val('owner_house_bldg_no', 'ownerHouseBldgNo', ''),
+    ownerBuildingName: val('owner_building_name', 'ownerBuildingName', ''),
+    ownerStreet: val('owner_street', 'ownerStreet', ''),
+    ownerBarangay: val('owner_barangay', 'ownerBarangay', ''),
+    ownerSubdivisionLandmark: val('owner_subdivision_landmark', 'ownerSubdivisionLandmark', ''),
+    ownerCityMunicipality: val('owner_city_municipality', 'ownerCityMunicipality', ''),
+    ownerProvince: val('owner_province', 'ownerProvince', ''),
+    ownerZipCode: val('owner_zip_code', 'ownerZipCode', ''),
+    ownerTelephoneNo: val('owner_telephone_no', 'ownerTelephoneNo', ''),
+    ownerMobileNo: val('owner_mobile_no', 'ownerMobileNo', ''),
+    ownerEmailAddress: val('owner_email_address', 'ownerEmailAddress', ''),
+    numEmployeesTotal: val('num_employees_total', 'numEmployeesTotal', 0),
+    numEmployeesMale: val('num_employees_male', 'numEmployeesMale', 0),
+    numEmployeesFemale: val('num_employees_female', 'numEmployeesFemale', 0),
+    numEmployeesBogoResiding: val('num_employees_bogo_residing', 'numEmployeesBogoResiding', 0),
+    isRented: Boolean(val('is_rented', 'isRented', false)),
+    isMarketStall: Boolean(val('is_market_stall', 'isMarketStall', false)),
+    isFranchisee: Boolean(val('is_franchisee', 'isFranchisee', false)),
+    isRepresentative: Boolean(val('is_representative', 'isRepresentative', false)),
+    representativeName: val('representative_name', 'representativeName', ''),
+    representativePosition: val('representative_position', 'representativePosition', ''),
+    specialBusinessTypes: val('special_business_types', 'specialBusinessTypes', []),
+    lessorName: val('lessor_name', 'lessorName', ''),
+    monthlyRental: val('monthly_rental', 'monthlyRental', ''),
+    lessorAddress: val('lessor_address', 'lessorAddress', ''),
+    lessorContactNo: val('lessor_contact_no', 'lessorContactNo', ''),
+    lessorEmailAddress: val('lessor_email_address', 'lessorEmailAddress', ''),
+    emergencyContactPerson: val('emergency_contact_person', 'emergencyContactPerson', ''),
+    emergencyContactNo: val('emergency_contact_no', 'emergencyContactNo', ''),
+    emergencyEmailAddress: val('emergency_email_address', 'emergencyEmailAddress', ''),
+    businessActivities: activities,
+    uploadedDocuments: uploadedDocs,
+    applicantSignatureName: val('applicant_signature_name', 'applicantSignatureName', '')
+  };
+}
+
+export function BusinessPermitForm({ 
+  currentUser, 
+  onLogout,
+  selectedTenantCode: externalTenantCode,
+  setSelectedTenantCode: externalSetTenantCode,
+  onSubmissionSuccess,
+  editingApplication,
+  onCancelEdit
+} = {}) {
+  const [internalTenantCode, setInternalTenantCode] = useState('BOGO');
+  const selectedTenantCode = externalTenantCode || internalTenantCode;
+  const setSelectedTenantCode = externalSetTenantCode || setInternalTenantCode;
+  const activeTenant = TENANTS.find(t => t.code === selectedTenantCode) || TENANTS[0];
+
+  const [formData, setFormData] = useState(() => {
+    const init = getInitialFormData();
+    if (currentUser) {
+      if (currentUser.email) {
+        init.ownerEmailAddress = currentUser.email;
+        init.busEmailAddress = currentUser.email;
+      }
+      if (currentUser.fullName) {
+        init.applicantSignatureName = currentUser.fullName;
+        const parts = currentUser.fullName.trim().split(' ');
+        if (parts.length > 1) {
+          init.taxpayerFirstName = parts.slice(0, -1).join(' ');
+          init.taxpayerLastName = parts[parts.length - 1];
+        } else {
+          init.taxpayerFirstName = currentUser.fullName;
+        }
+      }
+    }
+    return init;
+  });
+  
+  // Auto-sync municipality & province when tenant changes in navbar
+  useEffect(() => {
+    const tenant = TENANTS.find(t => t.code === selectedTenantCode);
+    if (tenant) {
+      setFormData(prev => ({
+        ...prev,
+        busCityMunicipality: tenant.name,
+        busProvince: tenant.province
+      }));
+    }
+  }, [selectedTenantCode]);
+
+  // Auto-load application data when editingApplication is provided
+  useEffect(() => {
+    if (editingApplication) {
+      setFormData(mapApplicationToFormData(editingApplication));
+      if (editingApplication.tenant_code && externalSetTenantCode) {
+        externalSetTenantCode(editingApplication.tenant_code);
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }, [editingApplication]);
+  
+  const [submitStatus, setSubmitStatus] = useState({ type: null, message: '' });
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }));
+  };
+
+  const handleCopyBusinessAddress = (e) => {
+    const isChecked = e.target.checked;
+    setFormData(prev => ({
+      ...prev,
+      sameAsBusinessAddress: isChecked,
+      ownerHouseBldgNo: isChecked ? prev.busHouseBldgNo : '',
+      ownerBuildingName: isChecked ? prev.busBuildingName : '',
+      ownerStreet: isChecked ? prev.busStreet : '',
+      ownerBarangay: isChecked ? prev.busBarangay : '',
+      ownerSubdivisionLandmark: isChecked ? prev.busSubdivisionLandmark : '',
+      ownerCityMunicipality: isChecked ? prev.busCityMunicipality : '',
+      ownerProvince: isChecked ? prev.busProvince : '',
+      ownerTelephoneNo: isChecked ? prev.busTelephoneNo : '',
+      ownerEmailAddress: isChecked ? prev.busEmailAddress : ''
+    }));
+  };
+
+  const handleActivityChange = (index, field, value) => {
+    setFormData(prev => {
+      const updated = [...prev.businessActivities];
+      updated[index] = { ...updated[index], [field]: value };
+      return { ...prev, businessActivities: updated };
+    });
+  };
+
+  const addActivityRow = () => {
+    setFormData(prev => ({
+      ...prev,
+      businessActivities: [...prev.businessActivities, { code: '', lineOfBusiness: '', noOfUnits: '', capitalization: '', grossEssential: '', grossNonEssential: '' }]
+    }));
+  };
+
+  const removeActivityRow = (index) => {
+    setFormData(prev => ({
+      ...prev,
+      businessActivities: prev.businessActivities.filter((_, i) => i !== index)
+    }));
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsSubmitting(true);
+    setSubmitStatus({ type: null, message: '' });
+
+    const isEditingMode = Boolean(editingApplication);
+    const targetId = editingApplication?.id;
+    const generateRefNo = () => `${selectedTenantCode}-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
+    let refNo = isEditingMode 
+      ? (editingApplication.referenceNo || editingApplication.reference_no || formData.referenceNo || '').trim()
+      : (formData.referenceNo?.trim() || generateRefNo());
+
+    try {
+      // Direct Supabase Option B Integration
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const isSupabaseConfigured = supabaseUrl && !supabaseUrl.includes('YOUR_SUPABASE_PROJECT_ID');
+
+      if (isSupabaseConfigured) {
+        // 1. Prepare clean database payload (strictly real columns in PostgreSQL)
+        const dbPayload = {
+          tenant_code: selectedTenantCode,
+          application_type: formData.applicationType || 'New',
+          amendment_type: formData.amendmentType || null,
+          mode_of_payment: formData.modeOfPayment || 'Annually',
+          transfer_location: Boolean(formData.transferLocation),
+          business_start_date: formData.businessStartDate || null,
+          date_of_application: formData.dateOfApplication || new Date().toISOString().split('T')[0],
+          reference_no: refNo,
+          dti_sec_cda_reg_no: formData.dtiSecCdaRegNo || null,
+          dti_sec_cda_reg_date: formData.dtiSecCdaRegDate || null,
+          type_of_organization: formData.typeOfOrganization || 'Single',
+          tin_no: formData.tinNo || null,
+          has_tax_incentive: Boolean(formData.hasTaxIncentive),
+          tax_incentive_entity: formData.taxIncentiveEntity || null,
+          ctc_no: formData.ctcNo || null,
+          taxpayer_last_name: formData.taxpayerLastName || '',
+          taxpayer_first_name: formData.taxpayerFirstName || '',
+          taxpayer_middle_name: formData.taxpayerMiddleName || null,
+          business_name: formData.businessName || '',
+          trade_name_franchise: formData.tradeNameFranchise || null,
+          corp_president_treasurer_last_name: formData.corpPresidentLastName || null,
+          corp_president_treasurer_first_name: formData.corpPresidentFirstName || null,
+          corp_president_treasurer_middle_name: formData.corpPresidentMiddleName || null,
+          bus_house_bldg_no: formData.busHouseBldgNo || null,
+          bus_building_name: formData.busBuildingName || null,
+          bus_street: formData.busStreet || null,
+          bus_barangay: formData.busBarangay || '',
+          bus_subdivision_landmark: formData.busSubdivisionLandmark || null,
+          bus_city_municipality: formData.busCityMunicipality || 'City of Bogo',
+          bus_province: formData.busProvince || 'Cebu',
+          bus_telephone_no: formData.busTelephoneNo || null,
+          bus_email_address: formData.busEmailAddress || null,
+          owner_house_bldg_no: formData.ownerHouseBldgNo || null,
+          owner_building_name: formData.ownerBuildingName || null,
+          owner_street: formData.ownerStreet || null,
+          owner_barangay: formData.ownerBarangay || null,
+          owner_subdivision_landmark: formData.ownerSubdivisionLandmark || null,
+          owner_city_municipality: formData.ownerCityMunicipality || null,
+          owner_province: formData.ownerProvince || null,
+          owner_telephone_no: formData.ownerTelephoneNo || null,
+          owner_email_address: formData.ownerEmailAddress || null,
+          num_employees_male: parseInt(formData.numEmployeesMale) || 0,
+          num_employees_female: parseInt(formData.numEmployeesFemale) || 0,
+          num_employees_bogo_residing: parseInt(formData.numEmployeesBogoResiding) || 0,
+          is_rented: Boolean(formData.isRented),
+          lessor_name: formData.lessorName || null,
+          monthly_rental: parseFloat(formData.monthlyRental) || null,
+          lessor_address: formData.lessorAddress || null,
+          lessor_contact_no: formData.lessorContactNo || null,
+          lessor_email_address: formData.lessorEmailAddress || null,
+          emergency_contact_person: formData.emergencyContactPerson || null,
+          emergency_contact_no: formData.emergencyContactNo || null,
+          emergency_email_address: formData.emergencyEmailAddress || null,
+          business_activities: formData.businessActivities || [],
+          applicant_signature_name: formData.applicantSignatureName || null,
+          updated_at: new Date().toISOString()
+        };
+
+        let insertedApp = null;
+        let appError = null;
+
+        if (isEditingMode) {
+          // Update primary target in Supabase (by ID first if available, otherwise by reference_no)
+          let query = supabase.from('bplo_application').update(dbPayload);
+          if (targetId) {
+            query = query.eq('id', targetId);
+          } else {
+            query = query.ilike('reference_no', refNo);
+          }
+
+          const updateRes = await query.select().maybeSingle();
+          insertedApp = updateRes.data;
+          appError = updateRes.error;
+
+          // If updating by ID returned no row, retry updating by reference number
+          if (!insertedApp && !appError && targetId && refNo) {
+            const retryRef = await supabase
+              .from('bplo_application')
+              .update(dbPayload)
+              .ilike('reference_no', refNo)
+              .select()
+              .maybeSingle();
+            insertedApp = retryRef.data;
+            appError = retryRef.error;
+          }
+
+          // If SELECT permissions fail (42501), perform plain update without returning rows
+          if (appError && appError.code === '42501') {
+            const plainQuery = targetId
+              ? supabase.from('bplo_application').update(dbPayload).eq('id', targetId)
+              : supabase.from('bplo_application').update(dbPayload).ilike('reference_no', refNo);
+            const { error: plainErr } = await plainQuery;
+            if (plainErr) throw plainErr;
+            appError = null;
+          } else if (appError) {
+            throw appError;
+          }
+        } else {
+          // New Application insert:
+          const insertRes = await supabase
+            .from('bplo_application')
+            .insert([dbPayload])
+            .select()
+            .maybeSingle();
+
+          insertedApp = insertRes.data;
+          appError = insertRes.error;
+
+          // Duplicate reference number retry
+          if (appError && (appError.code === '23505' || appError.message?.includes('reference_no_key'))) {
+            refNo = generateRefNo();
+            dbPayload.reference_no = refNo;
+            const retry = await supabase.from('bplo_application').insert([dbPayload]).select().maybeSingle();
+            insertedApp = retry.data;
+            appError = retry.error;
+          }
+
+          if (appError && appError.code === '42501') {
+            const { error: plainInsertError } = await supabase
+              .from('bplo_application')
+              .insert([dbPayload]);
+            if (plainInsertError) throw plainInsertError;
+            appError = null;
+          } else if (appError) {
+            throw appError;
+          }
+        }
+
+        // 2. Insert or update bplo_business_activities
+        let appId = insertedApp?.id || targetId;
+        if (!appId && refNo) {
+          try {
+            const { data: foundApp } = await supabase
+              .from('bplo_application')
+              .select('id')
+              .ilike('reference_no', refNo)
+              .maybeSingle();
+            if (foundApp?.id) appId = foundApp.id;
+          } catch (e) {}
+        }
+
+        if (appId && formData.businessActivities && formData.businessActivities.length > 0) {
+          if (isEditingMode) {
+            try {
+              await supabase.from('bplo_business_activities').delete().eq('application_id', appId);
+            } catch (err) {
+              console.warn('Activities delete warning:', err);
+            }
+          }
+          const activitiesPayload = formData.businessActivities
+            .filter(act => act.lineOfBusiness)
+            .map(act => ({
+              application_id: appId,
+              tenant_code: selectedTenantCode,
+              code: act.code || null,
+              line_of_business: act.lineOfBusiness,
+              no_of_units: parseInt(act.noOfUnits) || 0,
+              capitalization: parseFloat(act.capitalization) || 0.00,
+              gross_essential: parseFloat(act.grossEssential) || 0.00,
+              gross_non_essential: parseFloat(act.grossNonEssential) || 0.00
+            }));
+
+          if (activitiesPayload.length > 0) {
+            const { error: actError } = await supabase
+              .from('bplo_business_activities')
+              .insert(activitiesPayload);
+            if (actError) console.warn('Business activities insertion warning:', actError);
+          }
+        }
+
+        // 3. Prepare ARTA Electronic Acknowledgement Receipt (e-AR) payload
+        const docsList = Object.values(formData.uploadedDocuments || {});
+        const receiptPayload = {
+          id: appId || undefined,
+          referenceNo: refNo,
+          reference_no: refNo,
+          tenant_code: selectedTenantCode,
+          submittedAt: isEditingMode ? (editingApplication.submittedAt || new Date().toISOString()) : new Date().toISOString(),
+          submittedAtFormatted: new Date().toLocaleString('en-PH', { 
+            dateStyle: 'full', 
+            timeStyle: 'medium' 
+          }),
+          applicantName: `${formData.taxpayerFirstName || ''} ${formData.taxpayerLastName || ''}`.trim() || formData.applicantSignatureName || 'Applicant',
+          taxpayer_first_name: formData.taxpayerFirstName,
+          taxpayer_last_name: formData.taxpayerLastName,
+          businessName: formData.businessName || 'Business Establishment',
+          business_name: formData.businessName,
+          applicationType: formData.applicationType || 'New',
+          application_type: formData.applicationType || 'New',
+          typeOfOrganization: formData.typeOfOrganization || 'Single',
+          type_of_organization: formData.typeOfOrganization || 'Single',
+          businessAddress: `${formData.busHouseBldgNo || ''} ${formData.busStreet || ''} Brgy. ${formData.busBarangay || ''}, ${formData.busCityMunicipality || 'City of Bogo'}`.trim(),
+          bus_house_bldg_no: formData.busHouseBldgNo,
+          bus_street: formData.busStreet,
+          bus_barangay: formData.busBarangay,
+          bus_city_municipality: formData.busCityMunicipality,
+          bus_province: formData.busProvince,
+          isRented: Boolean(formData.isRented),
+          isMarketStall: Boolean(formData.isMarketStall),
+          isFranchisee: Boolean(formData.isFranchisee),
+          isRepresentative: Boolean(formData.isRepresentative),
+          specialBusinessTypes: formData.specialBusinessTypes || [],
+          business_activities: formData.businessActivities || [],
+          businessActivities: formData.businessActivities || [],
+          documents: docsList,
+          uploaded_documents: docsList,
+          status: isEditingMode ? (editingApplication.status || 'Pending') : 'Pending'
+        };
+
+        // Cache into recent applications & document storage for fast local lookup
+        try {
+          localStorage.setItem(`bplo_docs_${refNo}`, JSON.stringify(docsList));
+          const recents = JSON.parse(localStorage.getItem('bplo_recent_applications') || '[]');
+          const existingIdx = recents.findIndex(r => (r.referenceNo || '').toLowerCase() === refNo.toLowerCase());
+          if (existingIdx !== -1) {
+            recents[existingIdx] = { ...recents[existingIdx], ...receiptPayload };
+          } else {
+            recents.unshift(receiptPayload);
+          }
+          localStorage.setItem('bplo_recent_applications', JSON.stringify(recents.slice(0, 20)));
+        } catch (e) {
+          console.warn('Failed to cache recent receipt:', e);
+        }
+
+        setSubmitStatus({
+          type: 'success',
+          message: isEditingMode
+            ? `Application ${refNo} updated successfully! Your revisions have been recorded for evaluation.`
+            : `Application submitted successfully! Reference No: ${refNo}`
+        });
+
+        if (onSubmissionSuccess) {
+          onSubmissionSuccess(receiptPayload);
+        }
+
+        if (isEditingMode && onCancelEdit) {
+          onCancelEdit();
+        }
+
+        setFormData(getInitialFormData());
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        // Fallback to Express backend if Supabase env vars not configured yet
+        const endpoint = isEditingMode 
+          ? `http://localhost:5000/api/bplo-applications/${refNo}` 
+          : 'http://localhost:5000/api/bplo-applications';
+        const method = isEditingMode ? 'PUT' : 'POST';
+        const response = await fetch(endpoint, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...formData, referenceNo: refNo })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+          const receiptPayload = {
+            referenceNo: data.referenceNo || refNo,
+            submittedAt: isEditingMode ? (editingApplication.submittedAt || new Date().toISOString()) : new Date().toISOString(),
+            submittedAtFormatted: new Date().toLocaleString('en-PH', { 
+              dateStyle: 'full', 
+              timeStyle: 'medium' 
+            }),
+            applicantName: `${formData.taxpayerFirstName || ''} ${formData.taxpayerLastName || ''}`.trim() || formData.applicantSignatureName || 'Applicant',
+            businessName: formData.businessName || 'Business Establishment',
+            applicationType: formData.applicationType || 'New',
+            typeOfOrganization: formData.typeOfOrganization || 'Single',
+            isRented: Boolean(formData.isRented),
+            isMarketStall: Boolean(formData.isMarketStall),
+            isFranchisee: Boolean(formData.isFranchisee),
+            isRepresentative: Boolean(formData.isRepresentative),
+            specialBusinessTypes: formData.specialBusinessTypes || [],
+            documents: Object.values(formData.uploadedDocuments || {}),
+            status: isEditingMode ? (editingApplication.status || 'Under BPLO Evaluation') : 'Under BPLO Evaluation'
+          };
+
+          try {
+            const recents = JSON.parse(localStorage.getItem('bplo_recent_applications') || '[]');
+            const existingIdx = recents.findIndex(r => r.referenceNo === refNo);
+            if (existingIdx !== -1) {
+              recents[existingIdx] = receiptPayload;
+            } else {
+              recents.unshift(receiptPayload);
+            }
+            localStorage.setItem('bplo_recent_applications', JSON.stringify(recents.slice(0, 10)));
+          } catch (e) {
+            console.warn(e);
+          }
+
+          setSubmitStatus({
+            type: 'success',
+            message: isEditingMode 
+              ? `Application ${refNo} updated successfully! Revisions have been saved.` 
+              : `Application submitted successfully! Reference No: ${data.referenceNo || refNo}`
+          });
+
+          if (onSubmissionSuccess) {
+            onSubmissionSuccess(receiptPayload);
+          }
+
+          if (isEditingMode && onCancelEdit) {
+            onCancelEdit();
+          }
+
+          setFormData(getInitialFormData());
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        } else {
+          setSubmitStatus({ type: 'error', message: data.message || 'Submission failed' });
+        }
+      }
+    } catch (error) {
+      console.error('Submission error:', error);
+      const errMsg = error.code === '23505'
+        ? 'A permit application with this reference number already exists. Please clear the reference number field or try again.'
+        : (error.message || 'Failed to submit application. Please try again.');
+      setSubmitStatus({ type: 'error', message: errMsg });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="relative p-6 sm:p-10 max-w-5xl mx-auto text-gray-800 text-xs sm:text-sm my-6 font-['Poppins',sans-serif]">
+      
+      {/* Editing Application Banner */}
+      {editingApplication && (
+        <div className="mb-6 p-4 sm:p-5 rounded-2xl bg-amber-50 border-2 border-amber-300 text-amber-950 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm animate-fadeIn">
+          <div className="flex items-center gap-3.5 min-w-0">
+            <div className="w-11 h-11 rounded-2xl bg-amber-200 text-amber-900 flex items-center justify-center shrink-0 shadow-2xs">
+              <Edit3 className="w-5 h-5 text-amber-800" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-sm sm:text-base">Editing Application Submission</span>
+                <span className="font-mono font-bold text-xs px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-950 border border-amber-300">
+                  {editingApplication.referenceNo || editingApplication.reference_no}
+                </span>
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-200">
+                  Status: {editingApplication.status || 'Pending'}
+                </span>
+              </div>
+              <p className="text-xs text-amber-800 mt-1">
+                You are amending your submitted permit form. Updates will be saved directly to your existing reference number and synced with BPLO evaluators.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => {
+                if (onCancelEdit) onCancelEdit();
+                setFormData(getInitialFormData());
+              }}
+              className="px-4 py-2 rounded-full border border-amber-300 hover:bg-amber-100 text-amber-950 font-semibold text-xs transition-colors cursor-pointer bg-white shadow-2xs"
+            >
+              Cancel & New Form
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Official Form Header */}
+      <div className="border-b-2 border-gray-800 pb-4 mb-6">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div className="flex items-center gap-4">
+            <img
+              src={activeTenant.logo}
+              alt={`${activeTenant.name} Seal`}
+              className="w-20 h-20 object-contain flex-shrink-0 drop-shadow-sm"
+              onError={(e) => { e.target.onerror = null; e.target.src = '/assets/images/bogo_city_logo.png'; }}
+            />
+            <div>
+              <p className="text-[11px] font-medium uppercase text-gray-500 tracking-wide">Republic of the Philippines</p>
+              <p className="text-[11px] font-medium uppercase text-gray-500 tracking-wide">Province of {activeTenant.province}</p>
+              <h2 className="text-base sm:text-lg font-semibold text-gray-800 uppercase tracking-normal mt-0.5">{activeTenant.name}</h2>
+              <p className="text-[11px] text-gray-500 font-normal mt-0.5">Website: <span className="text-gray-700 font-medium">{activeTenant.website}</span></p>
+              <h3 className="text-xs font-medium uppercase mt-0.5 tracking-normal" style={{ color: activeTenant.primaryColor }}>{activeTenant.officeName}</h3>
+            </div>
+          </div>
+          <div className="bg-slate-50 border border-slate-200 p-3 rounded-xl text-[11px] space-y-1 text-gray-600 min-w-[200px] shadow-xs">
+            <p><span className="font-medium text-gray-800">Document Code:</span> {activeTenant.documentCode}</p>
+            <p><span className="font-medium text-gray-800">Tenant Code:</span> <span className="font-semibold text-slate-800">{activeTenant.code}</span></p>
+            <p><span className="font-medium text-gray-800">Date Effective:</span> September 3, 2026</p>
+            <p><span className="font-medium text-gray-800">Page:</span> 1 of 1</p>
+          </div>
+        </div>
+
+        {/* Main Title Banner */}
+        <div className="mt-5 text-white text-center py-3 px-4 rounded-xl font-medium text-sm sm:text-base tracking-wide uppercase shadow-md transition-colors duration-300" style={{ backgroundColor: activeTenant.primaryColor }}>
+          UNIFIED BUSINESS PERMIT APPLICATION FORM ({activeTenant.code})
+        </div>
+      </div>
+
+      {submitStatus.message && (
+        <div className={`mb-6 p-4 rounded-xl text-sm text-center font-bold shadow-sm ${
+          submitStatus.type === 'success'
+            ? 'bg-emerald-50 text-emerald-800 border border-emerald-300'
+            : 'bg-red-50 text-red-800 border border-red-300'
+        }`}>
+          {submitStatus.message}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+
+        {/* Section 1 - 5 Header Grid */}
+        <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
+            
+            {/* 1. Type */}
+            <div className="md:col-span-3 border-b md:border-b-0 md:border-r border-slate-200 pr-3 pb-3 md:pb-0">
+              <span className="font-semibold text-gray-700 block mb-2 text-xs uppercase tracking-wide">1. Type</span>
+              <div className="space-y-2 pl-1">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700 hover:text-gray-900">
+                  <input type="radio" name="applicationType" value="New" checked={formData.applicationType === 'New'} onChange={handleChange} className="w-4 h-4 text-[#159847] focus:ring-[#159847]" />
+                  <span>1.1 New</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700 hover:text-gray-900">
+                  <input type="radio" name="applicationType" value="Renewal" checked={formData.applicationType === 'Renewal'} onChange={handleChange} className="w-4 h-4 text-[#159847] focus:ring-[#159847]" />
+                  <span>1.2 Renewal</span>
+                </label>
+              </div>
+            </div>
+
+            {/* 2. Amendment */}
+            <div className="md:col-span-4 border-b md:border-b-0 md:border-r border-slate-200 pr-3 pb-3 md:pb-0">
+              <span className="font-semibold text-gray-700 block mb-2 text-xs uppercase tracking-wide">2. Amendment</span>
+              <select name="amendmentType" value={formData.amendmentType} onChange={handleChange} className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium">
+                <option value="">-- Select Amendment (if applicable) --</option>
+                <option value="2.1 From Single to Partnership">2.1 From Single to Partnership</option>
+                <option value="2.2 From Single to Corporation">2.2 From Single to Corporation</option>
+                <option value="2.3 From Partnership to Single">2.3 From Partnership to Single</option>
+                <option value="2.4 From Partnership to Corporation">2.4 From Partnership to Corporation</option>
+                <option value="2.5 From Corporation to Single">2.5 From Corporation to Single</option>
+                <option value="2.6 From Corporation to Partnership">2.6 From Corporation to Partnership</option>
+                <option value="2.8 Change/Add Line of Business">2.8 Change/Add Line of Business</option>
+              </select>
+            </div>
+
+            {/* 3. Mode of Payment & 4. Transfer */}
+            <div className="md:col-span-3 border-b md:border-b-0 md:border-r border-slate-200 pr-3 pb-3 md:pb-0">
+              <span className="font-semibold text-gray-700 block mb-2 text-xs uppercase tracking-wide">3. Mode of Payment</span>
+              <div className="space-y-1.5 pl-1 mb-3">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700 hover:text-gray-900">
+                  <input type="radio" name="modeOfPayment" value="Annually" checked={formData.modeOfPayment === 'Annually'} onChange={handleChange} className="w-4 h-4 text-[#159847] focus:ring-[#159847]" />
+                  <span>3.1 Annually</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700 hover:text-gray-900">
+                  <input type="radio" name="modeOfPayment" value="Quarterly" checked={formData.modeOfPayment === 'Quarterly'} onChange={handleChange} className="w-4 h-4 text-[#159847] focus:ring-[#159847]" />
+                  <span>3.2 Quarterly</span>
+                </label>
+              </div>
+              <span className="font-semibold text-gray-700 block mb-1 text-xs uppercase tracking-wide">4. Transfer</span>
+              <label className="flex items-center gap-2 cursor-pointer pl-1 text-xs font-medium text-gray-700">
+                <input type="checkbox" name="transferLocation" checked={formData.transferLocation} onChange={handleChange} className="w-4 h-4 rounded text-[#159847] focus:ring-[#159847]" />
+                <span>4.1 Location</span>
+              </label>
+            </div>
+
+            {/* 5. Business Start Date */}
+            <div className="md:col-span-2">
+              <label className="font-semibold text-gray-700 block mb-2 text-[11px] uppercase tracking-wide">5. Business Start Date:</label>
+              <input type="date" name="businessStartDate" value={formData.businessStartDate} onChange={handleChange} className="w-full text-xs p-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+
+          </div>
+        </div>
+
+        {/* Section 6 - 12 General Information */}
+        <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-4">
+          <h4 className="font-semibold text-[#159847] text-xs uppercase tracking-wider border-b border-slate-200 pb-2">General Information (Items 6 - 12)</h4>
+          
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="font-medium text-gray-700 block mb-1 text-xs">6. Date of Application *</label>
+              <input type="date" name="dateOfApplication" value={formData.dateOfApplication} onChange={handleChange} required className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="font-medium text-gray-700 block mb-1 text-xs">7. Reference No.</label>
+              <input type="text" name="referenceNo" value={formData.referenceNo} onChange={handleChange} placeholder="Auto-generated if empty" className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="font-medium text-gray-700 block mb-1 text-xs">8. DTI / SEC / CDA Reg No.</label>
+              <input type="text" name="dtiSecCdaRegNo" value={formData.dtiSecCdaRegNo} onChange={handleChange} placeholder="Registration No." className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+            <div>
+              <label className="font-medium text-gray-700 block mb-1 text-xs">8.1 DTI/SEC/CDA Reg Date</label>
+              <input type="date" name="dtiSecCdaRegDate" value={formData.dtiSecCdaRegDate} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="font-medium text-gray-700 block mb-1 text-xs">9. Type of Organization</label>
+              <select name="typeOfOrganization" value={formData.typeOfOrganization} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium">
+                <option value="Single">Single</option>
+                <option value="Partnership">Partnership</option>
+                <option value="Corporation">Corporation</option>
+                <option value="Cooperative">Cooperative</option>
+              </select>
+            </div>
+            <div>
+              <label className="font-medium text-gray-700 block mb-1 text-xs">10. TIN</label>
+              <input type="text" name="tinNo" value={formData.tinNo} onChange={handleChange} placeholder="xxx-xxx-xxx" className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="font-medium text-gray-700 block mb-1 text-xs">12. CTC NO</label>
+              <input type="text" name="ctcNo" value={formData.ctcNo} onChange={handleChange} placeholder="Community Tax Cert" className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+          </div>
+
+          {/* 11. Tax Incentive */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pt-2 border-t border-slate-200">
+            <span className="font-medium text-gray-700 text-xs">11. Are you enjoying tax incentive from any Government Entity?</span>
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700">
+                <input type="radio" name="hasTaxIncentive" value="true" checked={formData.hasTaxIncentive === true || formData.hasTaxIncentive === 'true'} onChange={() => setFormData(p => ({ ...p, hasTaxIncentive: true }))} className="w-4 h-4 text-[#159847] focus:ring-[#159847]" />
+                <span>Yes</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-gray-700">
+                <input type="radio" name="hasTaxIncentive" value="false" checked={formData.hasTaxIncentive === false || formData.hasTaxIncentive === 'false'} onChange={() => setFormData(p => ({ ...p, hasTaxIncentive: false, taxIncentiveEntity: '' }))} className="w-4 h-4 text-[#159847] focus:ring-[#159847]" />
+                <span>No</span>
+              </label>
+            </div>
+            {formData.hasTaxIncentive && (
+              <input type="text" name="taxIncentiveEntity" value={formData.taxIncentiveEntity} onChange={handleChange} placeholder="Please specify entity name" className="flex-1 p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            )}
+          </div>
+        </div>
+
+        {/* Section 13 - 16 Names */}
+        <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-4">
+          <h4 className="font-semibold text-[#159847] text-xs uppercase tracking-wider border-b border-slate-200 pb-2">Taxpayer & Business Details (Items 13 - 16)</h4>
+          
+          {/* 13. Name of Taxpayer */}
+          <div>
+            <span className="font-medium text-gray-700 block mb-2 text-xs">13. Name of Taxpayer *</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input type="text" name="taxpayerLastName" value={formData.taxpayerLastName} onChange={handleChange} placeholder="Last Name" required className="p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+              <input type="text" name="taxpayerFirstName" value={formData.taxpayerFirstName} onChange={handleChange} placeholder="First Name" required className="p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+              <input type="text" name="taxpayerMiddleName" value={formData.taxpayerMiddleName} onChange={handleChange} placeholder="Middle Name" className="p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+          </div>
+
+          {/* 14 & 15 Business & Trade Name */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="font-medium text-gray-700 block mb-1 text-xs">14. Business Name *</label>
+              <input type="text" name="businessName" value={formData.businessName} onChange={handleChange} placeholder="Registered Business Name" required className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="font-medium text-gray-700 block mb-1 text-xs">15. Trade Name / Franchise</label>
+              <input type="text" name="tradeNameFranchise" value={formData.tradeNameFranchise} onChange={handleChange} placeholder="Trade Name or Franchise (if any)" className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+          </div>
+
+          {/* 16. Name of President/Treasurer */}
+          <div>
+            <span className="font-medium text-gray-700 block mb-2 text-xs">16. Name of President / Treasurer of Corporation</span>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <input type="text" name="corpPresidentLastName" value={formData.corpPresidentLastName} onChange={handleChange} placeholder="Last Name" className="p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+              <input type="text" name="corpPresidentFirstName" value={formData.corpPresidentFirstName} onChange={handleChange} placeholder="First Name" className="p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+              <input type="text" name="corpPresidentMiddleName" value={formData.corpPresidentMiddleName} onChange={handleChange} placeholder="Middle Name" className="p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+          </div>
+
+        </div>
+
+        {/* Section 17 & 18 Addresses Side by Side */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          
+          {/* 17. Business Address */}
+          <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-3">
+            <h4 className="font-semibold text-[#159847] text-xs uppercase tracking-wider border-b border-slate-200 pb-2">17. Business Address</h4>
+            
+            <div>
+              <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">17.1 House No. / Bldg. No.</label>
+              <input type="text" name="busHouseBldgNo" value={formData.busHouseBldgNo} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">17.2 Building Name / Unit No.</label>
+              <input type="text" name="busBuildingName" value={formData.busBuildingName} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">17.3 Street</label>
+              <input type="text" name="busStreet" value={formData.busStreet} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">17.4 Barangay *</label>
+              <input type="text" name="busBarangay" value={formData.busBarangay} onChange={handleChange} required className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">17.5 Subdivision / Landmark</label>
+              <input type="text" name="busSubdivisionLandmark" value={formData.busSubdivisionLandmark} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">17.6 City / Municipality</label>
+                <input type="text" name="busCityMunicipality" value={formData.busCityMunicipality} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">17.7 Province</label>
+                <input type="text" name="busProvince" value={formData.busProvince} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">17.8 Telephone No. *</label>
+                <input type="tel" name="busTelephoneNo" value={formData.busTelephoneNo} onChange={handleChange} required className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">17.9 Email Address *</label>
+                <input type="email" name="busEmailAddress" value={formData.busEmailAddress} onChange={handleChange} required className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+              </div>
+            </div>
+          </div>
+
+          {/* 18. Owner's Address */}
+          <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-3">
+            <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+              <h4 className="font-semibold text-[#159847] text-xs uppercase tracking-wider">18. Owner's Address</h4>
+              <label className="flex items-center gap-1.5 text-xs font-semibold text-gray-700 cursor-pointer">
+                <input type="checkbox" name="sameAsBusinessAddress" checked={formData.sameAsBusinessAddress} onChange={handleCopyBusinessAddress} className="w-4 h-4 rounded text-[#159847] focus:ring-[#159847]" />
+                <span>Same as Business</span>
+              </label>
+            </div>
+
+            <div>
+              <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">18.1 House No. / Bldg. No.</label>
+              <input type="text" name="ownerHouseBldgNo" value={formData.ownerHouseBldgNo} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">18.2 Building Name / Unit No.</label>
+              <input type="text" name="ownerBuildingName" value={formData.ownerBuildingName} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">18.3 Street</label>
+              <input type="text" name="ownerStreet" value={formData.ownerStreet} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">18.4 Barangay</label>
+              <input type="text" name="ownerBarangay" value={formData.ownerBarangay} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div>
+              <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">18.5 Subdivision / Landmark</label>
+              <input type="text" name="ownerSubdivisionLandmark" value={formData.ownerSubdivisionLandmark} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">18.6 City / Municipality</label>
+                <input type="text" name="ownerCityMunicipality" value={formData.ownerCityMunicipality} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">18.7 Province</label>
+                <input type="text" name="ownerProvince" value={formData.ownerProvince} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">18.8 Telephone No.</label>
+                <input type="tel" name="ownerTelephoneNo" value={formData.ownerTelephoneNo} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+              </div>
+              <div>
+                <label className="text-[11px] font-semibold text-gray-600 block mb-0.5">18.9 Email Address</label>
+                <input type="email" name="ownerEmailAddress" value={formData.ownerEmailAddress} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847] font-medium" />
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Section 19 & 20 Employees & Lessor Details */}
+        <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-4">
+          <h4 className="font-semibold text-[#159847] text-xs uppercase tracking-wider border-b border-slate-200 pb-2">Employees & Lessor Details (Items 19 - 20)</h4>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pb-2">
+            <div>
+              <span className="font-medium text-gray-700 block mb-2 text-xs">19. Total No. of Employees in Establishment:</span>
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-gray-600">Male:</span>
+                  <input type="number" name="numEmployeesMale" min="0" value={formData.numEmployeesMale} onChange={handleChange} className="w-24 p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-gray-600">Female:</span>
+                  <input type="number" name="numEmployeesFemale" min="0" value={formData.numEmployeesFemale} onChange={handleChange} className="w-24 p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
+                </div>
+              </div>
+            </div>
+            <div>
+              <span className="font-medium text-gray-700 block mb-2 text-xs">19.1 No. of Employees Residing in Bogo City:</span>
+              <input type="number" name="numEmployeesBogoResiding" min="0" value={formData.numEmployeesBogoResiding} onChange={handleChange} className="w-36 p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
+            </div>
+          </div>
+
+          {/* 20. Rental Details */}
+          <div className="pt-2 border-t border-slate-200">
+            <div className="flex items-center gap-3 mb-3">
+              <span className="font-medium text-gray-700 text-xs">20. If Place of Business is Rented:</span>
+              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-[#159847]">
+                <input type="checkbox" name="isRented" checked={formData.isRented} onChange={handleChange} className="w-4 h-4 rounded text-[#159847] focus:ring-[#159847]" />
+                <span>Check if Rented</span>
+              </label>
+            </div>
+
+            {formData.isRented && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">20.1 Lessor's Name</label>
+                  <input type="text" name="lessorName" value={formData.lessorName} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">20.2 Monthly Rental (Php)</label>
+                  <input type="number" step="0.01" name="monthlyRental" value={formData.monthlyRental} onChange={handleChange} placeholder="0.00" className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
+                </div>
+                <div className="sm:col-span-2 lg:col-span-1">
+                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">20.3 Lessor's Address</label>
+                  <input type="text" name="lessorAddress" value={formData.lessorAddress} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">20.4 Lessor's Contact Number</label>
+                  <input type="tel" name="lessorContactNo" value={formData.lessorContactNo} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">20.5 Lessor's Email Address</label>
+                  <input type="email" name="lessorEmailAddress" value={formData.lessorEmailAddress} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
+                </div>
+              </div>
+            )}
+
+            {/* 20.B Location Special Status & Representative */}
+            <div className="pt-3 border-t border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-3">
+              <label className="flex items-start gap-2.5 cursor-pointer text-xs font-semibold text-gray-700 p-2 rounded-lg bg-white border border-slate-200">
+                <input 
+                  type="checkbox" 
+                  name="isMarketStall" 
+                  checked={formData.isMarketStall} 
+                  onChange={handleChange} 
+                  className="w-4 h-4 rounded text-[#159847] focus:ring-[#159847] mt-0.5" 
+                />
+                <div>
+                  <span className="text-[#159847] font-bold block">Business is located at Bogo City Public Market</span>
+                  <span className="text-[11px] text-gray-500 font-normal">Requires Stall Clearance from Market Administration (Item 12)</span>
+                </div>
+              </label>
+
+              <label className="flex items-start gap-2.5 cursor-pointer text-xs font-semibold text-gray-700 p-2 rounded-lg bg-white border border-slate-200">
+                <input 
+                  type="checkbox" 
+                  name="isRepresentative" 
+                  checked={formData.isRepresentative} 
+                  onChange={handleChange} 
+                  className="w-4 h-4 rounded text-[#159847] focus:ring-[#159847] mt-0.5" 
+                />
+                <div>
+                  <span className="text-[#159847] font-bold block">Transacting through an Authorized Representative</span>
+                  <span className="text-[11px] text-gray-500 font-normal">Requires Authorization Letter / Secretary's Certificate & Valid IDs</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+        </div>
+
+        {/* Section 21 Incase of Emergency */}
+        <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-3">
+          <h4 className="font-semibold text-[#159847] text-xs uppercase tracking-wider border-b border-slate-200 pb-2">21. Incase of Emergency</h4>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="text-[11px] font-medium text-gray-700 block mb-1">21.1 Contact Person</label>
+              <input type="text" name="emergencyContactPerson" value={formData.emergencyContactPerson} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
+            </div>
+            <div>
+              <label className="text-[11px] font-medium text-gray-700 block mb-1">21.2 Contact No.</label>
+              <input type="tel" name="emergencyContactNo" value={formData.emergencyContactNo} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
+            </div>
+            <div>
+              <label className="text-[11px] font-medium text-gray-700 block mb-1">21.3 Email Address</label>
+              <input type="email" name="emergencyEmailAddress" value={formData.emergencyEmailAddress} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
+            </div>
+          </div>
+        </div>
+
+        {/* Section 22 - 25 Business Activity Table */}
+        <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/70 space-y-4">
+          <div className="flex justify-between items-center border-b border-slate-200 pb-2">
+            <h4 className="font-semibold text-[#159847] text-xs uppercase tracking-wider">Business Activity Details (Items 22 - 25)</h4>
+            <button type="button" onClick={addActivityRow} className="px-4 py-1.5 bg-[#159847] text-white rounded-full text-xs hover:bg-[#12823c] transition-all font-bold shadow-sm flex items-center gap-1 cursor-pointer">
+              + Add Line of Business
+            </button>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-300">
+            <table className="w-full border-collapse text-left text-xs">
+              <thead>
+                <tr className="bg-slate-100 text-gray-700 text-[11px] font-semibold border-b border-slate-300">
+                  <th className="p-2.5 w-16 border-r border-slate-300">Code</th>
+                  <th className="p-2.5 border-r border-slate-300">22.1 Line of Business *</th>
+                  <th className="p-2.5 w-24 border-r border-slate-300">23. Units</th>
+                  <th className="p-2.5 w-36 border-r border-slate-300">24. Capitalization (New)</th>
+                  <th className="p-2.5 text-center border-r border-slate-300" colSpan={2}>
+                    25. Gross Sales / Receipts (Renewal)
+                    <div className="grid grid-cols-2 border-t border-slate-300 mt-1 pt-1 text-[10px] font-semibold text-gray-600">
+                      <span className="border-r border-slate-300">25.1 Essential</span>
+                      <span>25.2 Non-essential</span>
+                    </div>
+                  </th>
+                  <th className="p-2.5 w-10 text-center"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {formData.businessActivities.map((act, index) => (
+                  <tr key={index} className="bg-white border-b border-slate-200 hover:bg-slate-50">
+                    <td className="p-1.5 border-r border-slate-200">
+                      <input type="text" value={act.code} onChange={(e) => handleActivityChange(index, 'code', e.target.value)} placeholder="Code" className="w-full p-1.5 border border-slate-200 rounded text-xs font-medium focus:ring-1 focus:ring-[#159847]" />
+                    </td>
+                    <td className="p-1.5 border-r border-slate-200">
+                      <input type="text" value={act.lineOfBusiness} onChange={(e) => handleActivityChange(index, 'lineOfBusiness', e.target.value)} placeholder="Line of Business" required className="w-full p-1.5 border border-slate-200 rounded text-xs font-medium focus:ring-1 focus:ring-[#159847]" />
+                    </td>
+                    <td className="p-1.5 border-r border-slate-200">
+                      <input type="number" value={act.noOfUnits} onChange={(e) => handleActivityChange(index, 'noOfUnits', e.target.value)} placeholder="0" className="w-full p-1.5 border border-slate-200 rounded text-xs text-center font-medium focus:ring-1 focus:ring-[#159847]" />
+                    </td>
+                    <td className="p-1.5 border-r border-slate-200">
+                      <input type="number" step="0.01" value={act.capitalization} onChange={(e) => handleActivityChange(index, 'capitalization', e.target.value)} placeholder="0.00" className="w-full p-1.5 border border-slate-200 rounded text-xs font-medium focus:ring-1 focus:ring-[#159847]" />
+                    </td>
+                    <td className="p-1.5 border-r border-slate-200">
+                      <input type="number" step="0.01" value={act.grossEssential} onChange={(e) => handleActivityChange(index, 'grossEssential', e.target.value)} placeholder="Essential" className="w-full p-1.5 border border-slate-200 rounded text-xs font-medium focus:ring-1 focus:ring-[#159847]" />
+                    </td>
+                    <td className="p-1.5 border-r border-slate-200">
+                      <input type="number" step="0.01" value={act.grossNonEssential} onChange={(e) => handleActivityChange(index, 'grossNonEssential', e.target.value)} placeholder="Non-essential" className="w-full p-1.5 border border-slate-200 rounded text-xs font-medium focus:ring-1 focus:ring-[#159847]" />
+                    </td>
+                    <td className="p-1.5 text-center">
+                      {formData.businessActivities.length > 1 && (
+                        <button type="button" onClick={() => removeActivityRow(index)} className="text-red-500 hover:text-red-700 font-bold px-1.5 py-0.5 rounded hover:bg-red-50">
+                          ✕
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* ARTA Documentary Requirements Section (RA 11032 / Cloudinary Upload) */}
+        <ArtaDocumentUpload
+          formData={formData}
+          uploadedDocuments={formData.uploadedDocuments || {}}
+          onDocumentsChange={(docs) => setFormData(prev => ({ ...prev, uploadedDocuments: docs }))}
+          onConditionToggle={(field, value) => setFormData(prev => ({ ...prev, [field]: value }))}
+          tenantCode={selectedTenantCode}
+        />
+
+        {/* Legal Declaration */}
+        <div className="border border-amber-300/80 rounded-xl p-4 bg-amber-50/70 text-gray-800 text-xs space-y-3">
+          <p className="font-semibold italic text-justify leading-relaxed text-gray-700">
+            I DECLARE UNDER PENALTY OF PERJURY that all information in this application is true and correct based on my personal knowledge and authentic records submitted to the City of Bogo. Any false or misleading information supplied, or production of fake / falsified documents shall be grounds for appropriate legal action against me and automatically revokes the permit.
+          </p>
+
+          <div className="pt-2 flex flex-col sm:flex-row justify-end items-stretch sm:items-center gap-3">
+            <label className="font-medium text-gray-700 text-right pr-1">SIGNATURE OVER PRINTED NAME OF APPLICANT / OWNER / AUTHORIZED REPRESENTATIVE:</label>
+            <input
+              type="text"
+              name="applicantSignatureName"
+              value={formData.applicantSignatureName}
+              onChange={handleChange}
+              placeholder="Type Full Name to Sign"
+              required
+              className="p-2 border.5 border-slate-400 rounded-lg bg-white font-bold text-gray-900 text-sm sm:w-80 shadow-sm focus:ring-2 focus:ring-[#159847]"
+            />
+          </div>
+        </div>
+
+        {/* Submit Button */}
+        <button
+          type="submit"
+          disabled={isSubmitting}
+          className="w-full bg-[#159847] hover:bg-[#12823c] text-white py-3.5 px-6 rounded-full font-medium text-sm sm:text-base transition-all shadow-md hover:shadow-lg disabled:opacity-50 tracking-wide uppercase cursor-pointer"
+        >
+          {isSubmitting 
+            ? (editingApplication ? 'Updating Application...' : 'Submitting Application...') 
+            : (editingApplication ? 'SAVE & UPDATE UNIFIED BUSINESS PERMIT APPLICATION' : 'SUBMIT UNIFIED BUSINESS PERMIT APPLICATION')}
+        </button>
+
+      </form>
+    </div>
+  );
+}
+
+
+// Admin Dashboard Component
+function AdminDashboard({ setCurrentPage }) {
+  // Auth state
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+
+  // Admin section tabs
+  const [activeTab, setActiveTab] = useState('appointments');
+
+  // Dashboard state
+  const [appointments, setAppointments] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [filter, setFilter] = useState('all');
+  const [updatingId, setUpdatingId] = useState(null);
+
+  // Search & Filter state
 }
