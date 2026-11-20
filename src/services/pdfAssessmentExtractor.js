@@ -1,5 +1,5 @@
-// PDF Assessment Extractor for BPLO Tax Order of Payment (TOP)
-// Extracts itemized fee descriptions and PHP amounts from an uploaded Assessment PDF
+// PDF Assessment Extractor for City of Bogo BPLO Business Assessment Form (QF-BPLO-04)
+// Starts reading at the "Business Tax" line and extracts all itemized charges up to SUB TOTAL / GRAND TOTAL
 
 const PDFJS_CDN_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
 const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
@@ -40,7 +40,7 @@ function loadPdfJs() {
 }
 
 /**
- * Extract visual horizontal text lines from a PDF File using PDF.js
+ * Extract visual horizontal text lines AND full page text tokens from a PDF File using PDF.js
  */
 async function extractLinesWithPdfJs(arrayBuffer) {
   const pdfjsLib = await loadPdfJs();
@@ -76,7 +76,7 @@ async function extractLinesWithPdfJs(arrayBuffer) {
     // Sort items within each row left-to-right (smaller X first)
     for (const row of rows) {
       row.items.sort((a, b) => a.x - b.x);
-      const lineStr = row.items.map((i) => i.text).join('  ').trim();
+      const lineStr = row.items.map((i) => i.text).join(' ').trim();
       if (lineStr) {
         allLines.push(lineStr);
       }
@@ -94,7 +94,6 @@ function extractLinesFallback(arrayBuffer) {
   const raw = decoder.decode(arrayBuffer);
   const lines = [];
 
-  // Match literal strings inside parentheses (...) in PDF content streams
   const matches = raw.match(/\(([^()\\]|\\.)+\)/g) || [];
   let currentLine = [];
   for (const m of matches) {
@@ -105,19 +104,189 @@ function extractLinesFallback(arrayBuffer) {
     if (clean && /^[\x20-\x7E₱]+$/.test(clean)) {
       currentLine.push(clean);
       if (/\d+\.\d{2}$/.test(clean)) {
-        lines.push(currentLine.join('  '));
+        lines.push(currentLine.join(' '));
         currentLine = [];
       }
     }
   }
   if (currentLine.length > 0) {
-    lines.push(currentLine.join('  '));
+    lines.push(currentLine.join(' '));
   }
   return lines;
 }
 
 /**
- * Determine fee category based on description keywords
+ * Specialized parser for City of Bogo BUSINESS ASSESSMENT FORM (QF-BPLO-04)
+ * Starts reading at the "Business Tax" line and stops at "SUB TOTAL" / "GRAND TOTAL"
+ */
+function parseBogoAssessmentFormLines(lines) {
+  // 1. Find the "Business Tax" section start line
+  let startIdx = lines.findIndex((l) => /^business\s+tax$/i.test(l.trim()));
+  if (startIdx === -1) {
+    // Also check if "Business Tax" appears right after "Charge Code Year Particulars..."
+    startIdx = lines.findIndex(
+      (l, idx) =>
+        /\bbusiness\s+tax\b/i.test(l) &&
+        !/\bbusiness\s+tax\s*-/i.test(l) &&
+        idx > 2
+    );
+  }
+
+  if (startIdx === -1) return [];
+
+  // 2. Collect all tokens/lines from "Business Tax" until "SUB TOTAL" or "GRAND TOTAL" or "We declare"
+  const relevantLines = [];
+  for (let i = startIdx; i < lines.length; i++) {
+    const line = lines[i].replace(/\s+/g, ' ').trim();
+    if (!line) continue;
+
+    if (
+      /^(sub\s*total|grand\s*total|we\s+declare\s+the\s+penalties|assessment\s+prepared\s+by)/i.test(
+        line
+      )
+    ) {
+      break;
+    }
+    relevantLines.push(line);
+  }
+
+  // Known section headers in QF-BPLO-04
+  const sectionHeaderMap = {
+    'business tax': 'Business Tax',
+    'regulatory fees': 'Regulatory Fees',
+    'regulatory fee': 'Regulatory Fees',
+    'seal': 'Seal',
+    'service fees': 'Service Fees',
+    'service fee': 'Service Fees'
+  };
+
+  // Pre-merge wrapped multi-line rows in QF-BPLO-04:
+  // In QF-BPLO-04, a row like:
+  //   "1006 2026 Business Tax - Banks and Other Financial 150.00 0.00 0.00 150.00"
+  //   "Institutions || Micro Lending-2026"
+  // or:
+  //   "Business Tax - Banks and Other Financial"
+  //   "1006 2026 150.00 0.00 0.00 150.00"
+  //   "Institutions || Micro Lending-2026"
+  // can split across adjacent Y-lines depending on PDF cell vertical alignment.
+  // Let's normalize the stream between section headers & TOTAL lines!
+  const charges = [];
+  let currentCategory = 'Business Tax';
+  let pendingBuffer = [];
+
+  const flushBuffer = () => {
+    if (pendingBuffer.length === 0) return;
+    const combined = pendingBuffer.join(' ').replace(/\s+/g, ' ').trim();
+    pendingBuffer = [];
+
+    if (!combined) return;
+
+    // Split combined chunk if multiple charge items (each starting with 4-digit charge code + 4-digit year) got grouped
+    const itemRegex = /\b(\d{4})\s+(20\d{2})\b/g;
+    const matches = [...combined.matchAll(itemRegex)];
+
+    if (matches.length > 0) {
+      for (let mIdx = 0; mIdx < matches.length; mIdx++) {
+        const match = matches[mIdx];
+        const segStart = mIdx === 0 ? 0 : match.index;
+        const segEnd = mIdx + 1 < matches.length ? matches[mIdx + 1].index : combined.length;
+        const segment = combined.slice(segStart, segEnd).trim();
+        const parsedItem = parseSingleBogoRow(segment, match[1], match[2], currentCategory);
+        if (parsedItem) {
+          charges.push(parsedItem);
+        }
+      }
+    } else {
+      // Fallback if row had no 4-digit charge code + year
+      const parsedItem = parseSingleBogoRow(combined, '', '', currentCategory);
+      if (parsedItem) {
+        charges.push(parsedItem);
+      }
+    }
+  };
+
+  for (const line of relevantLines) {
+    const lower = line.toLowerCase();
+
+    // Check if this line is a section header
+    if (sectionHeaderMap[lower]) {
+      flushBuffer();
+      currentCategory = sectionHeaderMap[lower];
+      continue;
+    }
+
+    // Check if this line is a section TOTAL line (e.g. "TOTAL 650.00 0.00 0.00 650.00")
+    if (/^total\b/i.test(line)) {
+      flushBuffer();
+      continue;
+    }
+
+    // If line starts with a new 4-digit Charge Code + 4-digit Year and pendingBuffer already has a complete row (with amounts), flush first
+    const startsWithCodeYear = /^\d{4}\s+20\d{2}\b/.test(line);
+    const bufferHasAmount = pendingBuffer.some((l) => /\d+\.\d{2}/.test(l));
+    const bufferHasCodeYear = pendingBuffer.some((l) => /\b\d{4}\s+20\d{2}\b/.test(l));
+
+    if (startsWithCodeYear && bufferHasCodeYear && bufferHasAmount) {
+      flushBuffer();
+    }
+
+    pendingBuffer.push(line);
+  }
+
+  flushBuffer();
+  return charges;
+}
+
+/**
+ * Parse a single row segment from QF-BPLO-04 into an assessment charge object
+ */
+function parseSingleBogoRow(segment, chargeCode, year, category) {
+  let working = segment.trim();
+
+  // Remove the chargeCode and year from the working string
+  if (chargeCode && year) {
+    const codeYearPattern = new RegExp(`\\b${chargeCode}\\s+${year}\\b`);
+    working = working.replace(codeYearPattern, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  // Find all decimal numbers formatted like 1,234.56 or 500.00 in the segment
+  const decimalRegex = /(?:php|₱)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\.[0-9]{2}\b/gi;
+  const amountMatches = [...working.matchAll(decimalRegex)];
+
+  if (amountMatches.length === 0) return null;
+
+  // In QF-BPLO-04, the columns are: Tax Amount | Discount | Offset | Total Amount
+  // So the last decimal number is Total Amount (and the first of the 4 is Tax Amount)
+  const lastMatch = amountMatches[amountMatches.length - 1];
+  const rawTotal = lastMatch[0].replace(/[^\d.]/g, '');
+  const amount = parseFloat(rawTotal);
+
+  if (isNaN(amount) || amount <= 0) return null;
+
+  // Remove the trailing numeric columns (up to 4 decimal numbers: Tax Amount, Discount, Offset, Total Amount) from description
+  let description = working;
+  const columnsToStrip = amountMatches.slice(-4);
+  for (const m of columnsToStrip) {
+    description = description.replace(m[0], ' ');
+  }
+
+  description = description.replace(/\s+/g, ' ').trim();
+  if (!description || /^total\b/i.test(description)) return null;
+
+  return {
+    id: chargeCode ? `code_${chargeCode}` : `pdf_charge_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    chargeCode: chargeCode || '',
+    year: year || '2026',
+    description: chargeCode ? `${description}` : description,
+    category: category || 'Regulatory Fees',
+    amount,
+    isRegulatory: category !== 'Business Tax' && category !== 'Local Tax',
+    isFsic: false
+  };
+}
+
+/**
+ * Determine fee category based on description keywords for generic PDFs
  */
 function detectFeeCategory(description, rawLine = '') {
   const lower = `${description} ${rawLine}`.toLowerCase();
@@ -125,68 +294,71 @@ function detectFeeCategory(description, rawLine = '') {
     lower.includes('local tax') ||
     lower.includes('business tax') ||
     lower.includes('lbt') ||
-    lower.includes('franchise tax') ||
-    lower.includes('amusement tax')
+    lower.includes('mayors & business permit')
   ) {
-    return 'Local Tax';
+    return 'Business Tax';
+  }
+  if (lower.includes('security seal') || lower.includes('seal - bplo')) {
+    return 'Seal';
+  }
+  if (lower.includes('plate sticker') || lower.includes('service fee')) {
+    return 'Service Fees';
   }
   if (
     lower.includes('penalty') ||
     lower.includes('surcharge') ||
-    lower.includes('interest') ||
-    lower.includes('compromise')
+    lower.includes('interest')
   ) {
     return 'Penalty / Surcharge';
   }
-  if (
-    lower.includes('clearance') ||
-    lower.includes('zoning') ||
-    lower.includes('locational')
-  ) {
-    return 'Clearance Fee';
-  }
-  return 'Regulatory Fee';
+  return 'Regulatory Fees';
 }
 
 /**
- * Parse extracted PDF text lines into structured BPLO assessment charges:
- * [{ id, description, category, amount, isRegulatory, isFsic }]
+ * Parse extracted PDF text lines into structured BPLO assessment charges
  */
 export function parseLinesToAssessmentCharges(lines) {
-  const charges = [];
+  // 1. First try the official City of Bogo BUSINESS ASSESSMENT FORM (QF-BPLO-04) parser starting at "Business Tax"
+  const bogoCharges = parseBogoAssessmentFormLines(lines);
+  if (bogoCharges.length > 0) {
+    return bogoCharges;
+  }
 
-  // Patterns to ignore (headers, totals, metadata)
+  // 2. Fallback generic line-item parser for other assessment PDF layouts
+  const charges = [];
   const ignorePattern =
-    /^(total(\s+amount)?(\s+due)?|grand\s+total|sub[-\s]?total|net\s+amount|amount\s+due|amount\s+paid|total\s+assessed|consolidated\s+local\s+taxes|tax\s+order\s+of\s+payment|fee\s+description|particulars|nature\s+of\s+collection|page\s+\d+|date\s*:|reference\s*no|application\s*no|account\s*no|tin\s*:|or\s*no|official\s+receipt|republic\s+of\s+the\s+philippines|province\s+of|city\s+of\s+bogo|business\s+permit\s+and\s+licensing)/i;
+    /^(total(\s+amount)?(\s+due)?|grand\s+total|sub[-\s]?total|net\s+amount|amount\s+due|amount\s+paid|total\s+assessed|consolidated\s+local\s+taxes|tax\s+order\s+of\s+payment|business\s+assessment\s+form|fee\s+description|particulars|charge\s+code|page\s+\d+|date\s*:|reference\s*no|application\s*no|account\s*no|business\s*id|tin\s*:|or\s*no|official\s+receipt|republic\s+of\s+the\s+philippines|province\s+of|city\s+of\s+bogo|business\s+permit\s+and\s+licensing)/i;
 
   for (const rawLine of lines) {
     const line = rawLine.replace(/\s+/g, ' ').trim();
     if (!line || line.length < 4) continue;
 
-    // Match an amount at the end of the line (e.g. "Php 1,250.00", "₱500.00", "2,012.50", "300")
-    const amountMatch = line.match(
-      /(?:php|₱|p\b)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.([0-9]{2}))?\s*$/i
-    );
-    if (!amountMatch) continue;
+    if (/^(sub\s*total|grand\s*total|total)\b/i.test(line)) continue;
 
-    const wholePart = amountMatch[1].replace(/,/g, '');
-    const decimalPart = amountMatch[2] || '00';
-    const amount = parseFloat(`${wholePart}.${decimalPart}`);
+    // Match trailing decimal amount(s)
+    const decimalRegex = /(?:php|₱)?\s*([0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)\.[0-9]{2}\b/gi;
+    const decMatches = [...line.matchAll(decimalRegex)];
+    if (decMatches.length === 0) continue;
 
-    // Skip zero or unrealistic numbers (like years 2025/2026 when there's no decimal and no fee keyword)
+    const lastDec = decMatches[decMatches.length - 1];
+    const amount = parseFloat(lastDec[0].replace(/[^\d.]/g, ''));
     if (isNaN(amount) || amount <= 0 || amount > 50000000) continue;
-    if (!amountMatch[2] && (amount === 2024 || amount === 2025 || amount === 2026 || amount === 11032 || amount === 9514)) {
-      continue;
+
+    // Strip up to 4 trailing decimal columns (Tax Amount, Discount, Offset, Total Amount)
+    const firstDecIdx = decMatches.length >= 4 ? decMatches[decMatches.length - 4].index : lastDec.index;
+    let descPart = line.slice(0, firstDecIdx).trim();
+
+    // Strip leading Charge Code + Year (e.g. "1011 2026 ") or item number ("1.")
+    let chargeCode = '';
+    const codeYearMatch = descPart.match(/^(\d{4})\s+(20\d{2})\s+/);
+    if (codeYearMatch) {
+      chargeCode = codeYearMatch[1];
+      descPart = descPart.slice(codeYearMatch[0].length).trim();
+    } else {
+      descPart = descPart.replace(/^(?:#?\d{1,2}[.)]?)\s+/, '').trim();
     }
 
-    // Extract description before the matched amount
-    let descPart = line.slice(0, amountMatch.index).trim();
-
-    // Remove leading item numbers like "1", "1.", "01)", "#2"
-    descPart = descPart.replace(/^(?:#?\d{1,2}[.)]?)\s+/, '').trim();
-
-    // Remove trailing category column text if present in the row
-    const categoryRegex = /\b(Local\s+Tax|Regulatory\s+Fee|Clearance\s+Fee|Penalty\s*\/?\s*Surcharge)\s*$/i;
+    const categoryRegex = /\b(Business\s+Tax|Local\s+Tax|Regulatory\s+Fees?|Seal|Service\s+Fees?|Clearance\s+Fee|Penalty\s*\/?\s*Surcharge)\s*$/i;
     let explicitCategory = null;
     const catMatch = descPart.match(categoryRegex);
     if (catMatch) {
@@ -194,39 +366,23 @@ export function parseLinesToAssessmentCharges(lines) {
       descPart = descPart.replace(categoryRegex, '').trim();
     }
 
-    // Clean trailing dots, dashes, or currency markers
     descPart = descPart.replace(/[.\-_:|₱]+$/, '').replace(/\b(Php|PHP)\s*$/i, '').trim();
-
-    // Remove duplicate "15% to BFP" badge text if it got merged into description
-    descPart = descPart.replace(/\s+15%\s+to\s+BFP$/i, '').trim();
-
     if (!descPart || descPart.length < 3) continue;
     if (ignorePattern.test(descPart) || /^total\b/i.test(descPart)) continue;
-
-    // Must contain at least one letter
     if (!/[a-zA-Z]/.test(descPart)) continue;
 
     const category = explicitCategory
       ? explicitCategory.replace(/\s+/g, ' ')
       : detectFeeCategory(descPart, line);
 
-    const lowerDesc = descPart.toLowerCase();
-    const isFsic =
-      lowerDesc.includes('fire safety') ||
-      lowerDesc.includes('fsic') ||
-      lowerDesc.includes('15% to bfp');
-
     charges.push({
-      id: isFsic
-        ? 'fsic_fee'
-        : lowerDesc.includes('local business tax') || lowerDesc.includes('lbt')
-        ? 'lbt'
-        : `pdf_charge_${charges.length + 1}_${Date.now()}`,
+      id: chargeCode ? `code_${chargeCode}` : `pdf_charge_${charges.length + 1}_${Date.now()}`,
+      chargeCode,
       description: descPart,
       category,
       amount,
-      isRegulatory: category === 'Regulatory Fee' && !isFsic,
-      isFsic
+      isRegulatory: category !== 'Business Tax' && category !== 'Local Tax',
+      isFsic: false
     });
   }
 
@@ -253,4 +409,3 @@ export async function extractAssessmentFromPdf(file) {
     rawLines: lines
   };
 }
-

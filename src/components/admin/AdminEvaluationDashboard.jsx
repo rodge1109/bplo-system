@@ -48,12 +48,22 @@ import { uploadToCloudinary } from '../../services/cloudinaryService';
 import { extractAssessmentFromPdf } from '../../services/pdfAssessmentExtractor';
 
 export const DEFAULT_ASSESSMENT_CHARGES = [
-  { id: 'lbt', description: 'Local Business Tax (LBT)', category: 'Local Tax', amount: 1250.00, isRegulatory: false },
-  { id: 'mayors_fee', description: "Mayor's Permit Fee", category: 'Regulatory Fee', amount: 500.00, isRegulatory: true },
-  { id: 'garbage_fee', description: 'Garbage & Environmental Management Fee', category: 'Regulatory Fee', amount: 300.00, isRegulatory: true },
-  { id: 'sanitary_fee', description: 'Sanitary Inspection Fee', category: 'Regulatory Fee', amount: 250.00, isRegulatory: true },
-  { id: 'fsic_fee', description: 'Fire Safety Inspection Fee (FSIC 15% to BFP)', category: 'Regulatory Fee', amount: 345.00, isRegulatory: false, isFsic: true },
-  { id: 'plate_fee', description: 'Business Plate & QR Sticker Fee', category: 'Regulatory Fee', amount: 200.00, isRegulatory: true }
+  // Business Tax
+  { id: 'code_1011', chargeCode: '1011', year: '2026', description: 'Mayors & Business Permit', category: 'Business Tax', amount: 500.00, isRegulatory: false },
+  { id: 'code_1006', chargeCode: '1006', year: '2026', description: 'Business Tax - Banks and Other Financial Institutions || Micro Lending-2026', category: 'Business Tax', amount: 150.00, isRegulatory: false },
+  // Regulatory Fees
+  { id: 'code_2328', chargeCode: '2328', year: '2026', description: 'Garbage Fee (Business) SWM Fee', category: 'Regulatory Fees', amount: 3025.00, isRegulatory: true },
+  { id: 'code_1290', chargeCode: '1290', year: '2026', description: 'Police Clearance', category: 'Regulatory Fees', amount: 50.00, isRegulatory: true },
+  { id: 'code_1152', chargeCode: '1152', year: '2026', description: 'Fire Clearance', category: 'Regulatory Fees', amount: 20.00, isRegulatory: true },
+  { id: 'code_1363', chargeCode: '1363', year: '2026', description: 'Sanitary Permit', category: 'Regulatory Fees', amount: 30.00, isRegulatory: true },
+  { id: 'code_2376', chargeCode: '2376', year: '2026', description: 'Medical Certificate', category: 'Regulatory Fees', amount: 30.00, isRegulatory: true },
+  { id: 'code_2439', chargeCode: '2439', year: '2026', description: 'Realty Tax Clearance', category: 'Regulatory Fees', amount: 30.00, isRegulatory: true },
+  { id: 'code_2431', chargeCode: '2431', year: '2026', description: 'Processing and Card fee', category: 'Regulatory Fees', amount: 130.00, isRegulatory: true },
+  { id: 'code_1595', chargeCode: '1595', year: '2026', description: 'Business Plate', category: 'Regulatory Fees', amount: 450.00, isRegulatory: true },
+  // Seal
+  { id: 'code_2851', chargeCode: '2851', year: '2026', description: 'Document Security Seal - BPLO', category: 'Seal', amount: 50.00, isRegulatory: true },
+  // Service Fees
+  { id: 'code_2221', chargeCode: '2221', year: '2026', description: 'Business Plate Sticker', category: 'Service Fees', amount: 50.00, isRegulatory: true }
 ];
 
 export default function AdminEvaluationDashboard({
@@ -365,33 +375,8 @@ export default function AdminEvaluationDashboard({
       }
     } catch (e) {}
 
-    // 3. Dynamic baseline based on application's declared activities & capitalization
+    // 3. Default baseline from official City of Bogo Business Assessment Form (QF-BPLO-04)
     let items = DEFAULT_ASSESSMENT_CHARGES.map(c => ({ ...c }));
-    const activities = selectedApp.business_activities || selectedApp.businessActivities || [];
-    const totalCap = activities.reduce((sum, a) => sum + (parseFloat(a.capitalization) || 0), 0);
-    const totalGross = activities.reduce((sum, a) => sum + (parseFloat(a.gross_essential || a.grossEssential) || 0) + (parseFloat(a.gross_non_essential || a.grossNonEssential) || 0), 0);
-
-    if ((selectedApp.applicationType === 'New' || selectedApp.application_type === 'New') && totalCap > 0) {
-      const calculatedLbt = Math.max(500, Math.round(totalCap * 0.0125));
-      items = items.map(c => c.id === 'lbt' ? { 
-        ...c, 
-        amount: calculatedLbt, 
-        description: `Local Business Tax (LBT - 1.25% on ₱${totalCap.toLocaleString()} Capital)` 
-      } : c);
-    } else if ((selectedApp.applicationType === 'Renewal' || selectedApp.application_type === 'Renewal') && totalGross > 0) {
-      const calculatedLbt = Math.max(750, Math.round(totalGross * 0.015));
-      items = items.map(c => c.id === 'lbt' ? { 
-        ...c, 
-        amount: calculatedLbt, 
-        description: `Local Business Tax (LBT - on ₱${totalGross.toLocaleString()} Gross)` 
-      } : c);
-    }
-
-    // 15% FSIC calculation
-    const nonFsic = items.filter(c => !c.isFsic).reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0);
-    const calculatedFsic = Math.round(nonFsic * 0.15 * 100) / 100;
-    items = items.map(c => c.id === 'fsic_fee' ? { ...c, amount: calculatedFsic } : c);
-
     setAssessmentCharges(items);
   }, [selectedApp?.referenceNo]);
 
@@ -623,12 +608,31 @@ INSTRUCTIONS FOR APPLICANT:
     }
   };
 
-  // Accept a single document
-  const handleAcceptDoc = (doc) => {
+  // Helper to uniquely match a single document without colliding on shared fileNames
+  const isSameDocument = (d, targetDoc, dIdx, targetIdx) => {
+    if (typeof targetIdx === 'number' && typeof dIdx === 'number') {
+      return dIdx === targetIdx;
+    }
+    if (d === targetDoc) return true;
+    if (d.docId && targetDoc.docId && d.docId === targetDoc.docId) return true;
+    if (d.id && targetDoc.id && d.id === targetDoc.id) return true;
+    if (d.title && targetDoc.title && d.title === targetDoc.title) return true;
+    return false;
+  };
+
+  // Accept a single document (or Undo if already accepted)
+  const handleAcceptDoc = (doc, docIdx) => {
     if (!selectedApp || !doc) return;
-    const updatedDocs = (selectedApp.documents || []).map(d => {
-      const isMatch = d === doc || (d.docId && d.docId === doc.docId) || (d.fileName && d.fileName === doc.fileName);
-      if (isMatch) {
+    const isCurrentlyAccepted = doc.status === 'accepted' || (doc.isVerified && doc.status !== 'rejected');
+
+    if (isCurrentlyAccepted) {
+      // Undo accept -> revert this specific document back to Pending Review
+      handleResetDocStatus(doc, docIdx);
+      return;
+    }
+
+    const updatedDocs = (selectedApp.documents || []).map((d, idx) => {
+      if (isSameDocument(d, doc, idx, docIdx)) {
         return { 
           ...d, 
           status: 'accepted',
@@ -646,14 +650,13 @@ INSTRUCTIONS FOR APPLICANT:
   };
 
   // Reject a single document
-  const handleRejectDoc = (doc, initialReason = '') => {
+  const handleRejectDoc = (doc, initialReason = '', docIdx) => {
     if (!selectedApp || !doc) return;
-    const docKey = doc.docId || doc.id || doc.fileName;
+    const docKey = doc.docId || doc.id || (typeof docIdx === 'number' ? `doc_${docIdx}` : doc.title || doc.fileName);
     const existingReason = initialReason !== undefined ? initialReason : (doc.rejectionReason || '');
 
-    const updatedDocs = (selectedApp.documents || []).map(d => {
-      const isMatch = d === doc || (d.docId && d.docId === doc.docId) || (d.fileName && d.fileName === doc.fileName);
-      if (isMatch) {
+    const updatedDocs = (selectedApp.documents || []).map((d, idx) => {
+      if (isSameDocument(d, doc, idx, docIdx)) {
         return { 
           ...d, 
           status: 'rejected',
@@ -674,7 +677,7 @@ INSTRUCTIONS FOR APPLICANT:
   };
 
   // Save rejection reason for a document
-  const handleSaveRejectionReason = (doc, reason, docKey) => {
+  const handleSaveRejectionReason = (doc, reason, docKey, docIdx) => {
     if (!selectedApp || !doc) return;
     const finalReason = (reason !== undefined ? reason : (rejectionDrafts[docKey] || '')).trim();
     if (!finalReason) {
@@ -682,9 +685,8 @@ INSTRUCTIONS FOR APPLICANT:
       return;
     }
 
-    const updatedDocs = (selectedApp.documents || []).map(d => {
-      const isMatch = d === doc || (d.docId && d.docId === doc.docId) || (d.fileName && d.fileName === doc.fileName);
-      if (isMatch) {
+    const updatedDocs = (selectedApp.documents || []).map((d, idx) => {
+      if (isSameDocument(d, doc, idx, docIdx)) {
         return { 
           ...d, 
           status: 'rejected',
@@ -705,11 +707,10 @@ INSTRUCTIONS FOR APPLICANT:
   };
 
   // Update rejection reason for a document directly
-  const handleUpdateRejectionReason = (doc, reason) => {
+  const handleUpdateRejectionReason = (doc, reason, docIdx) => {
     if (!selectedApp || !doc) return;
-    const updatedDocs = (selectedApp.documents || []).map(d => {
-      const isMatch = d === doc || (d.docId && d.docId === doc.docId) || (d.fileName && d.fileName === doc.fileName);
-      if (isMatch) {
+    const updatedDocs = (selectedApp.documents || []).map((d, idx) => {
+      if (isSameDocument(d, doc, idx, docIdx)) {
         return { 
           ...d, 
           status: 'rejected',
@@ -723,12 +724,11 @@ INSTRUCTIONS FOR APPLICANT:
     saveUpdatedDocuments(updatedDocs);
   };
 
-  // Reset document evaluation back to pending
-  const handleResetDocStatus = (doc) => {
+  // Reset / Undo document evaluation back to Pending Review
+  const handleResetDocStatus = (doc, docIdx) => {
     if (!selectedApp || !doc) return;
-    const updatedDocs = (selectedApp.documents || []).map(d => {
-      const isMatch = d === doc || (d.docId && d.docId === doc.docId) || (d.fileName && d.fileName === doc.fileName);
-      if (isMatch) {
+    const updatedDocs = (selectedApp.documents || []).map((d, idx) => {
+      if (isSameDocument(d, doc, idx, docIdx)) {
         return { 
           ...d, 
           status: 'pending',
@@ -740,8 +740,8 @@ INSTRUCTIONS FOR APPLICANT:
     });
 
     saveUpdatedDocuments(updatedDocs);
-    setToastMessage(`Document "${doc.title || doc.fileName}" reset to Pending Review.`);
-    setTimeout(() => setToastMessage(''), 2000);
+    setToastMessage(`Undone: "${doc.title || doc.fileName}" reset to Pending Review.`);
+    setTimeout(() => setToastMessage(''), 2500);
   };
 
   // Accept all documents at once
@@ -985,12 +985,17 @@ INSTRUCTIONS FOR APPLICANT:
   };
 
   const FEE_PRESETS = [
-    { title: 'Signboard / Billboard Fee', category: 'Regulatory Fee', amount: 150 },
-    { title: 'Weights & Measures Sealing', category: 'Regulatory Fee', amount: 200 },
-    { title: 'Zoning & Land Use Inspection', category: 'Regulatory Fee', amount: 300 },
-    { title: 'Engineering Building Inspection', category: 'Regulatory Fee', amount: 250 },
-    { title: 'Late Filing Surcharge (25%)', category: 'Penalty / Surcharge', amount: Math.round((assessmentCharges.find(c => c.id === 'lbt')?.amount || 1250) * 0.25) },
-    { title: 'Health Card / ID Fee', category: 'Regulatory Fee', amount: 100 }
+    { title: 'Mayors & Business Permit (1011)', category: 'Business Tax', amount: 500 },
+    { title: 'Garbage Fee (Business) SWM Fee (2328)', category: 'Regulatory Fees', amount: 3025 },
+    { title: 'Police Clearance (1290)', category: 'Regulatory Fees', amount: 50 },
+    { title: 'Fire Clearance (1152)', category: 'Regulatory Fees', amount: 20 },
+    { title: 'Sanitary Permit (1363)', category: 'Regulatory Fees', amount: 30 },
+    { title: 'Medical Certificate (2376)', category: 'Regulatory Fees', amount: 30 },
+    { title: 'Realty Tax Clearance (2439)', category: 'Regulatory Fees', amount: 30 },
+    { title: 'Processing and Card fee (2431)', category: 'Regulatory Fees', amount: 130 },
+    { title: 'Business Plate (1595)', category: 'Regulatory Fees', amount: 450 },
+    { title: 'Document Security Seal - BPLO (2851)', category: 'Seal', amount: 50 },
+    { title: 'Business Plate Sticker (2221)', category: 'Service Fees', amount: 50 }
   ];
 
   const getDocumentDaysLapsed = (doc, app) => {
@@ -1610,16 +1615,16 @@ INSTRUCTIONS FOR APPLICANT:
                                     <span className="text-xs text-gray-400 italic mr-1">Hardcopy</span>
                                   )}
 
-                                  {/* Accept Button */}
+                                  {/* Accept Button (Click again to Undo if already Accepted) */}
                                   <button
                                     type="button"
-                                    onClick={() => handleAcceptDoc(doc)}
+                                    onClick={() => handleAcceptDoc(doc, idx)}
                                     className={`px-4 py-2 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
                                       isAccepted 
                                         ? 'bg-gradient-to-r from-[#159847] to-[#12823c] text-white shadow-2xs' 
                                         : 'bg-white hover:bg-emerald-50 text-emerald-700 border border-emerald-300 hover:border-emerald-500 shadow-2xs'
                                     }`}
-                                    title="Accept this document"
+                                    title={isAccepted ? 'Click to undo accept and return to Pending Review' : 'Accept this document'}
                                   >
                                     <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                                     <span>{isAccepted ? 'Accepted' : 'Accept'}</span>
@@ -1630,11 +1635,9 @@ INSTRUCTIONS FOR APPLICANT:
                                     type="button"
                                     onClick={() => {
                                       if (!isRejected) {
-                                        handleRejectDoc(doc);
+                                        handleRejectDoc(doc, '', idx);
                                       } else {
-                                        if (window.confirm(`Reset "${doc.title || doc.fileName}" status back to Pending Review?`)) {
-                                          handleResetDocStatus(doc);
-                                        }
+                                        handleResetDocStatus(doc, idx);
                                       }
                                     }}
                                     className={`px-4 py-2 rounded-full text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 active:scale-95 ${
@@ -1642,11 +1645,24 @@ INSTRUCTIONS FOR APPLICANT:
                                         ? 'bg-rose-600 hover:bg-rose-700 text-white shadow-2xs' 
                                         : 'bg-white hover:bg-rose-50 text-rose-700 border border-rose-300 hover:border-rose-500 shadow-2xs'
                                     }`}
-                                    title={isRejected ? 'Click to reset status' : 'Reject this document and provide reason'}
+                                    title={isRejected ? 'Click to undo rejection and return to Pending Review' : 'Reject this document and provide reason'}
                                   >
                                     <X className="w-3.5 h-3.5 stroke-[2.5]" />
                                     <span>{isRejected ? 'Rejected' : 'Reject'}</span>
                                   </button>
+
+                                  {/* Explicit Undo Button whenever document is Accepted or Rejected */}
+                                  {(isAccepted || isRejected) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleResetDocStatus(doc, idx)}
+                                      className="px-3 py-2 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 text-xs font-semibold transition-all cursor-pointer flex items-center gap-1 active:scale-95"
+                                      title="Undo decision and return to Pending Review"
+                                    >
+                                      <RotateCcw className="w-3.5 h-3.5" />
+                                      <span>Undo</span>
+                                    </button>
+                                  )}
                                 </div>
                               </div>
 
@@ -1664,7 +1680,7 @@ INSTRUCTIONS FOR APPLICANT:
                                   </div>
 
                                   {(() => {
-                                    const docKey = doc.docId || doc.id || doc.fileName || `doc_${idx}`;
+                                    const docKey = doc.docId || doc.id || `doc_${idx}`;
                                     const draftVal = rejectionDrafts[docKey];
                                     const currentReason = draftVal !== undefined ? draftVal : (doc.rejectionReason || '');
                                     const hasReason = Boolean(currentReason && currentReason.trim().length > 0);
@@ -1683,7 +1699,7 @@ INSTRUCTIONS FOR APPLICANT:
                                               if (e.key === 'Enter') {
                                                 e.preventDefault();
                                                 if (hasReason) {
-                                                  handleSaveRejectionReason(doc, currentReason.trim(), docKey);
+                                                  handleSaveRejectionReason(doc, currentReason.trim(), docKey, idx);
                                                 }
                                               }
                                             }}
@@ -1695,7 +1711,7 @@ INSTRUCTIONS FOR APPLICANT:
                                           <button
                                             type="button"
                                             disabled={!hasReason}
-                                            onClick={() => handleSaveRejectionReason(doc, currentReason.trim(), docKey)}
+                                            onClick={() => handleSaveRejectionReason(doc, currentReason.trim(), docKey, idx)}
                                             className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 select-none ${
                                               !hasReason
                                                 ? 'bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed opacity-60'
@@ -2225,9 +2241,10 @@ INSTRUCTIONS FOR APPLICANT:
                             onChange={(e) => setNewChargeForm({ ...newChargeForm, category: e.target.value })}
                             className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white text-xs font-medium focus:ring-2 focus:ring-emerald-500 focus:outline-none"
                           >
-                            <option value="Regulatory Fee">Regulatory Fee</option>
-                            <option value="Local Tax">Local Tax</option>
-                            <option value="Clearance Fee">Clearance Fee</option>
+                            <option value="Business Tax">Business Tax</option>
+                            <option value="Regulatory Fees">Regulatory Fees</option>
+                            <option value="Seal">Seal</option>
+                            <option value="Service Fees">Service Fees</option>
                             <option value="Penalty / Surcharge">Penalty / Surcharge</option>
                           </select>
                         </div>
@@ -2297,6 +2314,11 @@ INSTRUCTIONS FOR APPLICANT:
                                     />
                                   ) : (
                                     <div className="flex items-center gap-2 flex-wrap">
+                                      {charge.chargeCode && (
+                                        <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                                          {charge.chargeCode}
+                                        </span>
+                                      )}
                                       <span className="font-semibold text-slate-800">{charge.description}</span>
                                       {charge.isFsic && (
                                         <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 font-medium">
@@ -2321,22 +2343,25 @@ INSTRUCTIONS FOR APPLICANT:
                                       onChange={(e) => setEditForm({ ...editForm, category: e.target.value })}
                                       className="w-full px-2 py-1.5 border border-amber-300 rounded-lg bg-white text-xs focus:ring-2 focus:ring-amber-500 focus:outline-none"
                                     >
-                                      <option value="Regulatory Fee">Regulatory Fee</option>
-                                      <option value="Local Tax">Local Tax</option>
-                                      <option value="Clearance Fee">Clearance Fee</option>
+                                      <option value="Business Tax">Business Tax</option>
+                                      <option value="Regulatory Fees">Regulatory Fees</option>
+                                      <option value="Seal">Seal</option>
+                                      <option value="Service Fees">Service Fees</option>
                                       <option value="Penalty / Surcharge">Penalty / Surcharge</option>
                                     </select>
                                   ) : (
                                     <span className={`inline-flex items-center text-[10px] font-bold px-2.5 py-0.5 rounded-full ${
-                                      charge.category === 'Local Tax'
+                                      charge.category === 'Business Tax' || charge.category === 'Local Tax'
                                         ? 'bg-sky-50 text-sky-800 border border-sky-200'
                                         : charge.category === 'Penalty / Surcharge'
                                         ? 'bg-red-50 text-red-800 border border-red-200'
-                                        : charge.category === 'Clearance Fee'
+                                        : charge.category === 'Seal' || charge.category === 'Clearance Fee'
                                         ? 'bg-purple-50 text-purple-800 border border-purple-200'
+                                        : charge.category === 'Service Fees'
+                                        ? 'bg-amber-50 text-amber-800 border border-amber-200'
                                         : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
                                     }`}>
-                                      {charge.category || 'Regulatory Fee'}
+                                      {charge.category || 'Regulatory Fees'}
                                     </span>
                                   )}
                                 </td>
