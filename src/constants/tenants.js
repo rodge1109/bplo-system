@@ -3,7 +3,7 @@ export const TENANTS = [
     code: 'BOGO',
     name: 'City of Bogo',
     province: 'Cebu',
-    logo: 'https://res.cloudinary.com/demo/image/upload/v1790442410/brxtdbopzqncgyzclwxe.png',
+    logo: '/assets/images/bogo_city_logo.png',
     documentCode: 'QF-BPLO-01',
     primaryColor: '#159847',
     website: 'www.cityofbogocebu.gov.ph',
