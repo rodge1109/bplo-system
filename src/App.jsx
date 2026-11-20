@@ -8,6 +8,7 @@ import ArtaDocumentUpload from './components/documents/ArtaDocumentUpload';
 import AcknowledgementReceiptModal from './components/documents/AcknowledgementReceiptModal';
 import ApplicationTracker from './components/documents/ApplicationTracker';
 import AdminEvaluationDashboard from './components/admin/AdminEvaluationDashboard';
+import PlatformFeeGate from './components/payment/PlatformFeeGate';
 
 // Cart Context
 const CartContext = createContext();
@@ -72,6 +73,16 @@ export default function RestaurantApp() {
   const [trackerInitialRef, setTrackerInitialRef] = useState('');
   const [activeReceiptData, setActiveReceiptData] = useState(null);
   const [editingApplication, setEditingApplication] = useState(null);
+
+  // ₱200.00 Platform Fee Payment Gate state (per new application session)
+  const [platformFeePayment, setPlatformFeePayment] = useState(() => {
+    try {
+      const saved = sessionStorage.getItem('bplo_platformFeePayment');
+      return saved ? JSON.parse(saved) : null;
+    } catch (e) {
+      return null;
+    }
+  });
 
   const handleEditApplication = (appData) => {
     setEditingApplication(appData);
@@ -141,7 +152,9 @@ export default function RestaurantApp() {
       console.warn(e);
     }
     setCurrentUser(null);
+    setPlatformFeePayment(null);
     localStorage.removeItem('bplo_currentUser');
+    sessionStorage.removeItem('bplo_platformFeePayment');
   };
   const [cartItems, setCartItems] = useState([]);
   const [currentPage, setCurrentPage] = useState('home');
@@ -425,15 +438,38 @@ export default function RestaurantApp() {
               activeTenant={activeTenant}
               onSwitchToApplicantView={() => setViewMode('applicant')}
             />
+          ) : !platformFeePayment && !editingApplication ? (
+            <PlatformFeeGate
+              currentUser={currentUser}
+              activeTenant={activeTenant}
+              onPaymentConfirmed={(paymentData) => {
+                setPlatformFeePayment(paymentData);
+                try {
+                  sessionStorage.setItem('bplo_platformFeePayment', JSON.stringify(paymentData));
+                } catch (e) {
+                  console.warn(e);
+                }
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              onOpenTracker={() => setTrackerOpen(true)}
+              onLogout={handleLogout}
+            />
           ) : (
             <BusinessPermitForm
               currentUser={currentUser}
               onLogout={handleLogout}
               selectedTenantCode={selectedTenantCode}
               setSelectedTenantCode={setSelectedTenantCode}
+              platformFeePayment={platformFeePayment}
               onSubmissionSuccess={(receipt) => {
                 setActiveReceiptData(receipt);
                 setEditingApplication(null);
+                setPlatformFeePayment(null);
+                try {
+                  sessionStorage.removeItem('bplo_platformFeePayment');
+                } catch (e) {
+                  console.warn(e);
+                }
               }}
               editingApplication={editingApplication}
               onCancelEdit={() => setEditingApplication(null)}
@@ -1982,6 +2018,7 @@ export function BusinessPermitForm({
   onLogout,
   selectedTenantCode: externalTenantCode,
   setSelectedTenantCode: externalSetTenantCode,
+  platformFeePayment,
   onSubmissionSuccess,
   editingApplication,
   onCancelEdit
@@ -2277,11 +2314,26 @@ export function BusinessPermitForm({
 
         // 3. Prepare ARTA Electronic Acknowledgement Receipt (e-AR) payload
         const docsList = Object.values(formData.uploadedDocuments || {});
+        if (platformFeePayment && !docsList.some(d => d.id === 'platform_fee_receipt')) {
+          docsList.unshift({
+            docId: 'platform_fee_receipt',
+            id: 'platform_fee_receipt',
+            code: 'FEE-200',
+            title: `Platform Fee Receipt (₱200.00 • ${platformFeePayment.channel} Ref: ${platformFeePayment.referenceNo})`,
+            issuingOffice: `${platformFeePayment.channel} Online Payment`,
+            cloudinaryUrl: platformFeePayment.receiptUrl,
+            fileName: platformFeePayment.receiptFileName || 'platform_fee_receipt.png',
+            fileSize: platformFeePayment.receiptFileSize || 0,
+            format: platformFeePayment.receiptFormat || 'png',
+            uploadedAt: platformFeePayment.paidAt
+          });
+        }
         const receiptPayload = {
           id: appId || undefined,
           referenceNo: refNo,
           reference_no: refNo,
           tenant_code: selectedTenantCode,
+          platformFeePayment: platformFeePayment || editingApplication?.platformFeePayment || null,
           submittedAt: isEditingMode ? (editingApplication.submittedAt || new Date().toISOString()) : new Date().toISOString(),
           submittedAtFormatted: new Date().toLocaleString('en-PH', { 
             dateStyle: 'full', 
@@ -2463,6 +2515,40 @@ export function BusinessPermitForm({
               Cancel & New Form
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Platform Fee Paid Verification Banner */}
+      {platformFeePayment && !editingApplication && (
+        <div className="mb-6 p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#16A34A] text-white flex items-center justify-center shrink-0">
+              <CheckCircle2 className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-bold text-xs sm:text-sm text-emerald-950">
+                  ₱200.00 Platform Fee Confirmed
+                </span>
+                <span className="px-2 py-0.5 rounded-full bg-white border border-emerald-200 text-[11px] font-mono font-bold text-emerald-800">
+                  {platformFeePayment.channel} • Ref: {platformFeePayment.referenceNo}
+                </span>
+              </div>
+              <p className="text-[11px] text-emerald-700 mt-0.5">
+                Step 2 of 2: Complete your Unified Business Permit Application Form below. Your payment proof will be automatically attached.
+              </p>
+            </div>
+          </div>
+          {platformFeePayment.receiptUrl && (
+            <a
+              href={platformFeePayment.receiptUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="px-3.5 py-2 rounded-xl bg-white hover:bg-emerald-100/60 border border-emerald-200 text-emerald-900 font-bold text-xs transition-colors shrink-0 text-center"
+            >
+              View Receipt
+            </a>
+          )}
         </div>
       )}
 

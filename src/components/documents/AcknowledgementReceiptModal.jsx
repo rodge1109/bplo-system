@@ -215,6 +215,20 @@ export default function AcknowledgementReceiptModal({
                 <span className="text-gray-500 block font-normal">Declared Business Address:</span>
                 <span className="font-semibold text-slate-900">{receiptData.businessAddress || 'Declared Address'}</span>
               </div>
+              {receiptData.platformFeePayment && (
+                <div className="sm:col-span-2 pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span className="text-gray-500 block font-normal">Online Platform Fee (₱200.00):</span>
+                    <span className="font-semibold text-emerald-800">
+                      Paid via {receiptData.platformFeePayment.channel} • Ref No: {receiptData.platformFeePayment.referenceNo}
+                    </span>
+                  </div>
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-bold">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>₱200.00 Paid</span>
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 

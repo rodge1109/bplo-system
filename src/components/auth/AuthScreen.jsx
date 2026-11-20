@@ -7,6 +7,7 @@ import {
   Mail, 
   Phone, 
   ArrowLeft, 
+  Check,
   CheckCircle2, 
   AlertCircle, 
   X,
@@ -17,8 +18,8 @@ import {
 import { supabase } from '../../supabaseClient';
 
 export default function AuthScreen({ onLoginSuccess }) {
-  // Mode: 'login' | 'signup' | 'forgot-password'
-  const [mode, setMode] = useState('login');
+  // Mode: 'welcome' | 'login' | 'signup' | 'forgot-password'
+  const [mode, setMode] = useState('welcome');
 
   // Form Fields
   const [email, setEmail] = useState('');
@@ -290,46 +291,147 @@ export default function AuthScreen({ onLoginSuccess }) {
     <div className="min-h-screen w-full bg-[#FAFAF8] flex flex-col justify-center items-center py-8 px-4 text-[#0A0F0D] select-none font-sans">
       
       {/* Main Container Card */}
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-xl border border-slate-100 p-7 sm:p-9 flex flex-col relative transition-all duration-300">
+      <div className="w-full max-w-[440px] bg-white rounded-3xl border border-slate-200 p-6 sm:p-8 flex flex-col relative transition-all duration-300">
         
-        {/* Back button when not in login mode */}
-        {mode !== 'login' && (
-          <div className="mb-3">
+        {/* Close (X) button in top-right corner like reference modal */}
+        <button
+          type="button"
+          onClick={() => handleDemoAccess('applicant')}
+          title="Continue as Guest"
+          className="absolute top-5 right-5 w-8 h-8 rounded-full text-gray-400 hover:text-gray-700 hover:bg-gray-100 flex items-center justify-center transition-colors cursor-pointer"
+        >
+          <X className="w-4 h-4" />
+        </button>
+
+        {/* Back button when in login, signup, or forgot-password mode */}
+        {mode !== 'welcome' && (
+          <div className="mb-2">
             <button
               type="button"
-              onClick={() => switchMode('login')}
+              onClick={() => switchMode(mode === 'forgot-password' ? 'login' : 'welcome')}
               className="inline-flex items-center gap-1.5 text-xs font-bold text-[#1B4332] hover:text-[#2D6A4F] py-1 px-2.5 rounded-full bg-slate-100 hover:bg-slate-200/80 transition-all cursor-pointer"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Login</span>
+              <span>{mode === 'forgot-password' ? 'Back to Sign In' : 'Back'}</span>
             </button>
           </div>
         )}
 
-        {/* Header: Bogo City Logo & Title */}
-        <div className="text-center mb-6">
-          <div className="w-24 h-24 sm:w-28 sm:h-28 mx-auto mb-3 flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
-            <img
-              src="/assets/images/bogo_city_logo.png"
-              alt="City of Bogo Official Seal"
-              className="w-full h-full object-contain filter drop-shadow-sm"
-            />
+        {/* ======================= WELCOME LANDING VIEW (MATCHING PHOTO) ======================= */}
+        {mode === 'welcome' && (
+          <div className="flex flex-col items-center text-center pt-1">
+            {/* Top Original Logo */}
+            <div className="w-24 h-24 mb-4 flex items-center justify-center">
+              <img
+                src="/assets/images/bogo_city_logo.png"
+                alt="BPLO City of Bogo Logo"
+                className="w-full h-full object-contain filter drop-shadow-sm"
+              />
+            </div>
+
+            {/* Main Heading */}
+            <h1 className="text-xl sm:text-[22px] font-extrabold text-[#111827] leading-snug tracking-tight px-2 mb-3">
+              Track your Permit Applications here at BPLO-City of Bogo
+            </h1>
+
+            {/* Subtitle Description */}
+            <p className="text-xs sm:text-[13px] text-gray-500 leading-relaxed mb-5 px-1">
+              Sign in with your existing BPLO Portal account to see your permit applications and evaluation status. New to BPLO-City of Bogo? Create a free account. You can also apply as a guest.
+            </p>
+
+            {/* Outlined Feature Checklist Box */}
+            <div className="w-full rounded-2xl border border-gray-200 bg-white p-4 sm:p-5 space-y-3.5 text-left mb-6">
+              <div className="flex items-start gap-3">
+                <Check className="w-4 h-4 text-[#159847] stroke-[3] flex-shrink-0 mt-0.5" />
+                <p className="text-xs sm:text-[13px] text-gray-600 leading-snug">
+                  See active and past business permit applications for your establishment — anytime.
+                </p>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <Check className="w-4 h-4 text-[#159847] stroke-[3] flex-shrink-0 mt-0.5" />
+                <p className="text-xs sm:text-[13px] text-gray-600 leading-snug">
+                  Sync ARTA documentary requirements, assessment fees, and evaluation status across BPLO.
+                </p>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <Check className="w-4 h-4 text-[#159847] stroke-[3] flex-shrink-0 mt-0.5" />
+                <p className="text-xs sm:text-[13px] text-gray-600 leading-snug">
+                  Receive real-time updates on clearances, endorsements, and official receipts.
+                </p>
+              </div>
+
+              <div className="flex items-start gap-3">
+                <Check className="w-4 h-4 text-[#159847] stroke-[3] flex-shrink-0 mt-0.5" />
+                <p className="text-xs sm:text-[13px] text-gray-600 leading-snug">
+                  Your personal business profile — permits, renewals, and compliance history.
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons matching screenshot */}
+            <div className="w-full space-y-3">
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => switchMode('login')}
+                  className="w-full py-3.5 px-4 rounded-xl bg-[#16A34A] hover:bg-[#15803D] active:scale-[0.99] text-white font-bold text-sm shadow-md shadow-green-600/20 transition-all cursor-pointer"
+                >
+                  Sign In
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => switchMode('signup')}
+                  className="w-full py-3.5 px-4 rounded-xl bg-white hover:bg-gray-50 active:scale-[0.99] text-gray-900 font-bold text-sm border border-gray-200 transition-all cursor-pointer"
+                >
+                  Create Account
+                </button>
+              </div>
+
+              <button
+                type="button"
+                disabled={isLoading}
+                onClick={() => handleDemoAccess('applicant')}
+                className="w-full py-3.5 px-4 rounded-xl bg-white hover:bg-gray-50 active:scale-[0.99] text-gray-900 font-bold text-sm border border-gray-200 transition-all cursor-pointer flex items-center justify-center gap-2"
+              >
+                {isLoading ? (
+                  <div className="w-4 h-4 border-2 border-gray-300 border-t-gray-800 rounded-full animate-spin" />
+                ) : (
+                  <span>Apply as Guest</span>
+                )}
+              </button>
+            </div>
           </div>
-          <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[#1B4332] text-[11px] font-bold mb-2">
-            <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-            <span>City of Bogo • BPLO Portal</span>
+        )}
+
+        {/* Header: Bogo City Logo & Title (for Login / Signup / Forgot Password views) */}
+        {mode !== 'welcome' && (
+          <div className="text-center mb-6">
+            <div className="w-24 h-24 mx-auto mb-3 flex items-center justify-center transform hover:scale-105 transition-transform duration-300">
+              <img
+                src="/assets/images/bogo_city_logo.png"
+                alt="City of Bogo Official Seal"
+                className="w-full h-full object-contain filter drop-shadow-sm"
+              />
+            </div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-[#1B4332] text-[11px] font-bold mb-2">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              <span>BPLO-City of Bogo</span>
+            </div>
+            <h1 className="text-2xl font-bold text-slate-800 tracking-tight">
+              {mode === 'login' && 'Sign In'}
+              {mode === 'signup' && 'Create Account'}
+              {mode === 'forgot-password' && 'Reset Password'}
+            </h1>
+            <p className="text-xs sm:text-sm text-gray-500 font-medium mt-1">
+              {mode === 'login' && 'Sign in with your existing BPLO Portal account'}
+              {mode === 'signup' && 'Register unified business permit account'}
+              {mode === 'forgot-password' && 'Enter your email to receive recovery instructions'}
+            </p>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-medium text-slate-700 tracking-normal">
-            {mode === 'login' && 'Welcome Back'}
-            {mode === 'signup' && 'Create Account'}
-            {mode === 'forgot-password' && 'Reset Password'}
-          </h1>
-          <p className="text-xs sm:text-sm text-gray-500 font-medium mt-1">
-            {mode === 'login' && 'Login to your account'}
-            {mode === 'signup' && 'Register unified business permit account'}
-            {mode === 'forgot-password' && 'Enter your email to receive recovery instructions'}
-          </p>
-        </div>
+        )}
 
         {/* Content Body */}
         <div className="flex-1 flex flex-col justify-between">
