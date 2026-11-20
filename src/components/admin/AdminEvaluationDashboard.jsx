@@ -44,6 +44,8 @@ import { supabase } from '../../supabaseClient';
 import { TENANTS } from '../../constants/tenants';
 import BusinessPermitViewModal from './BusinessPermitViewModal';
 import { getArtaRequirements } from '../documents/ArtaDocumentUpload';
+import { uploadToCloudinary } from '../../services/cloudinaryService';
+import { extractAssessmentFromPdf } from '../../services/pdfAssessmentExtractor';
 
 export const DEFAULT_ASSESSMENT_CHARGES = [
   { id: 'lbt', description: 'Local Business Tax (LBT)', category: 'Local Tax', amount: 1250.00, isRegulatory: false },
@@ -84,6 +86,9 @@ export default function AdminEvaluationDashboard({
     category: 'Regulatory Fee',
     amount: ''
   });
+  const [isParsingAssessmentPdf, setIsParsingAssessmentPdf] = useState(false);
+  const [assessmentPdfDoc, setAssessmentPdfDoc] = useState(null);
+  const [showAssessmentPdfPreview, setShowAssessmentPdfPreview] = useState(false);
 
   // Released Permit View Modal
   const [releasedPermit, setReleasedPermit] = useState(null);
@@ -328,6 +333,18 @@ export default function AdminEvaluationDashboard({
   // Load & hydrate assessment charges whenever selectedApp changes
   useEffect(() => {
     if (!selectedApp) return;
+
+    // Load saved assessment PDF attachment if any
+    try {
+      const savedPdf =
+        selectedApp.assessment_pdf ||
+        selectedApp.assessmentPdf ||
+        JSON.parse(localStorage.getItem(`bplo_assessment_pdf_${selectedApp.referenceNo}`) || 'null');
+      setAssessmentPdfDoc(savedPdf || null);
+      setShowAssessmentPdfPreview(false);
+    } catch (e) {
+      setAssessmentPdfDoc(null);
+    }
 
     // 1. Check if application object has assessment_items or assessmentItems
     const saved = selectedApp.assessment_items || selectedApp.assessmentItems;
@@ -804,6 +821,80 @@ INSTRUCTIONS FOR APPLICANT:
     setIsAddingCharge(false);
     setToastMessage(`Added charge "${newCharge.description}"!`);
     setTimeout(() => setToastMessage(''), 2500);
+  };
+
+  // Upload & Auto-Extract Itemized Assessment PDF into Fee Description table
+  const handleUploadAssessmentPdf = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsParsingAssessmentPdf(true);
+    try {
+      // 1. Extract itemized fee descriptions & amounts from the PDF
+      const { charges: extractedCharges } = await extractAssessmentFromPdf(file);
+
+      // 2. Upload PDF file for viewing/reference
+      const uploaded = await uploadToCloudinary(file, {
+        docType: 'tax_order_of_payment_pdf',
+        tenantCode: selectedApp?.tenant_code || activeTenant?.code || 'BOGO'
+      });
+
+      const pdfMetadata = {
+        fileName: uploaded.original_filename || file.name,
+        url: uploaded.secure_url || uploaded.url,
+        fileSize: uploaded.bytes || file.size,
+        uploadedAt: new Date().toISOString(),
+        extractedCount: extractedCharges.length
+      };
+
+      setAssessmentPdfDoc(pdfMetadata);
+      if (selectedApp?.referenceNo) {
+        try {
+          localStorage.setItem(
+            `bplo_assessment_pdf_${selectedApp.referenceNo}`,
+            JSON.stringify(pdfMetadata)
+          );
+        } catch (err) {}
+      }
+
+      if (extractedCharges.length > 0) {
+        // Replace table rows with the extracted itemized charges from the PDF
+        const chargesWithPdfRef = extractedCharges.map((item, idx) => ({
+          ...item,
+          sourcePdfName: pdfMetadata.fileName,
+          sourcePdfUrl: idx === 0 ? pdfMetadata.url : undefined
+        }));
+        persistCharges(chargesWithPdfRef);
+        setToastMessage(
+          `✓ Auto-extracted ${extractedCharges.length} itemized fees from "${file.name}" into Fee Description!`
+        );
+      } else {
+        // Scanned image PDF with no selectable text layer: attach PDF in Fee Description & open preview
+        const fallbackRow = [
+          {
+            id: `pdf_assessment_${Date.now()}`,
+            description: `Itemized Assessment per Attached PDF (${pdfMetadata.fileName})`,
+            category: 'Local Tax',
+            amount: totalAssessmentAmount || 0,
+            isRegulatory: false,
+            sourcePdfName: pdfMetadata.fileName,
+            sourcePdfUrl: pdfMetadata.url
+          }
+        ];
+        persistCharges(fallbackRow);
+        setShowAssessmentPdfPreview(true);
+        setToastMessage(
+          `Attached "${file.name}" to Fee Description. (Scanned PDF detected — review or edit amount directly.)`
+        );
+      }
+      setTimeout(() => setToastMessage(''), 4000);
+    } catch (err) {
+      console.error('Assessment PDF upload error:', err);
+      alert('Failed to process Assessment PDF: ' + (err.message || 'Unknown error'));
+    } finally {
+      setIsParsingAssessmentPdf(false);
+      e.target.value = '';
+    }
   };
 
   const handleStartEdit = (charge) => {
@@ -1915,6 +2006,33 @@ INSTRUCTIONS FOR APPLICANT:
                     </div>
 
                     <div className="flex items-center gap-2 flex-wrap">
+                      {/* Upload Itemized Assessment PDF Button */}
+                      <label
+                        className={`px-4 py-2.5 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer shadow-2xs active:scale-95 bg-sky-50 text-sky-800 border border-sky-300 hover:bg-sky-100 ${
+                          isParsingAssessmentPdf ? 'opacity-70 pointer-events-none' : ''
+                        }`}
+                        title="Upload an Itemized Assessment of Business Tax Order PDF to auto-extract fees into the table"
+                      >
+                        <input
+                          type="file"
+                          accept=".pdf,application/pdf"
+                          onChange={handleUploadAssessmentPdf}
+                          className="hidden"
+                          disabled={isParsingAssessmentPdf}
+                        />
+                        {isParsingAssessmentPdf ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 text-sky-700 animate-spin" />
+                            <span>Extracting PDF...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="w-3.5 h-3.5 text-sky-700" />
+                            <span>Upload Assessment PDF</span>
+                          </>
+                        )}
+                      </label>
+
                       <button
                         type="button"
                         onClick={() => setIsAddingCharge(!isAddingCharge)}
@@ -1953,7 +2071,8 @@ INSTRUCTIONS FOR APPLICANT:
                         disabled={isUpdating}
                         onClick={() => handleUpdateStatus('Payment Pending', { 
                           total_assessed: totalAssessmentAmount,
-                          assessment_items: assessmentCharges
+                          assessment_items: assessmentCharges,
+                          assessment_pdf: assessmentPdfDoc
                         })}
                         className="px-6 py-2.5 rounded-full bg-gradient-to-r from-[#159847] to-[#12823c] hover:from-[#12823c] hover:to-[#0f6c32] text-white text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-md hover:shadow-lg active:scale-95"
                       >
@@ -1962,6 +2081,82 @@ INSTRUCTIONS FOR APPLICANT:
                       </button>
                     </div>
                   </div>
+
+                  {/* Uploaded Assessment PDF Info Banner & Inline Preview */}
+                  {assessmentPdfDoc && (
+                    <div className="rounded-2xl border border-sky-200 bg-sky-50/70 p-3.5 sm:p-4 space-y-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-9 h-9 rounded-xl bg-sky-600 text-white flex items-center justify-center shrink-0">
+                            <FileText className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold text-slate-900 truncate">
+                                {assessmentPdfDoc.fileName}
+                              </span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white border border-sky-200 text-sky-800">
+                                {assessmentPdfDoc.extractedCount > 0
+                                  ? `${assessmentPdfDoc.extractedCount} Itemized Fees Extracted`
+                                  : 'Official Assessment PDF Attached'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-sky-800 mt-0.5">
+                              Fee descriptions and amounts below were populated from this uploaded Tax Order of Payment PDF.
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setShowAssessmentPdfPreview(!showAssessmentPdfPreview)}
+                            className="px-3 py-1.5 rounded-xl bg-white hover:bg-sky-100 border border-sky-200 text-sky-900 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5 text-sky-700" />
+                            <span>{showAssessmentPdfPreview ? 'Hide PDF' : 'Preview PDF'}</span>
+                          </button>
+
+                          {assessmentPdfDoc.url && (
+                            <a
+                              href={assessmentPdfDoc.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="px-3 py-1.5 rounded-xl bg-white hover:bg-sky-100 border border-sky-200 text-sky-900 text-xs font-semibold flex items-center gap-1 transition-colors"
+                              title="Open PDF in New Tab"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5 text-sky-700" />
+                            </a>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAssessmentPdfDoc(null);
+                              setShowAssessmentPdfPreview(false);
+                              if (selectedApp?.referenceNo) {
+                                localStorage.removeItem(`bplo_assessment_pdf_${selectedApp.referenceNo}`);
+                              }
+                            }}
+                            className="p-1.5 rounded-xl bg-white hover:bg-red-50 border border-slate-200 text-red-600 transition-colors cursor-pointer"
+                            title="Remove Attached Assessment PDF"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {showAssessmentPdfPreview && assessmentPdfDoc.url && (
+                        <div className="rounded-xl overflow-hidden border border-sky-200 bg-white">
+                          <iframe
+                            src={assessmentPdfDoc.url}
+                            title="Uploaded Itemized Assessment PDF"
+                            className="w-full h-96"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Add Charge Drawer / Form */}
                   {isAddingCharge && (
@@ -2101,11 +2296,17 @@ INSTRUCTIONS FOR APPLICANT:
                                       className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg bg-white text-xs font-semibold focus:ring-2 focus:ring-amber-500 focus:outline-none"
                                     />
                                   ) : (
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                       <span className="font-semibold text-slate-800">{charge.description}</span>
                                       {charge.isFsic && (
                                         <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200 font-medium">
                                           15% to BFP
+                                        </span>
+                                      )}
+                                      {charge.sourcePdfName && (
+                                        <span className="inline-flex items-center gap-1 text-[10px] text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full border border-sky-200 font-medium">
+                                          <FileText className="w-3 h-3" />
+                                          <span>From PDF</span>
                                         </span>
                                       )}
                                     </div>

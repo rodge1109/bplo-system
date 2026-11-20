@@ -215,24 +215,7 @@ export const getArtaRequirements = (formData = {}) => {
   if (isNew) {
     const list = [];
 
-    // 1. Filled up Unified Business Permit Application Form
-    list.push({
-      id: 'app_form',
-      itemNo: 1,
-      code: 'BPLO-01',
-      title: 'Filled up Unified Business Permit Application Form',
-      subtitle: 'Accomplished and signed official Unified Application Form for Business Permit',
-      issuingOffice: 'Business Permit & Licensing Office (BPLO)',
-      issuingOfficeShort: 'BPLO',
-      legalBasis: 'RA 11032 / BPLS Unified Form',
-      isMandatory: true,
-      category: 'core',
-      copyType: 'Original signed copy',
-      accept: '.pdf,.jpg,.jpeg,.png',
-      formats: 'PDF, JPG, PNG (Max 10MB)'
-    });
-
-    // 2. Proof of Business Registration
+    // Proof of Business Registration (Item 1 in online checklist; online form is already filled out above)
     if (orgType === 'Single') {
       list.push({
         id: 'business_registration',
@@ -571,14 +554,14 @@ export const getArtaRequirements = (formData = {}) => {
         id: 'rep_valid_ids',
         itemNo: 'Rep-2',
         code: 'REP-02',
-        title: 'Valid Government IDs (Owner & Representative)',
-        subtitle: 'Any valid ID of Business Owner/Corporate Secretary AND Authorized Representative (1 photocopy each)',
+        title: '1 Valid Government ID Only (Business Owner/Corporate Secretary & Representative)',
+        subtitle: '1 Valid ID only: Any 1 valid government-issued ID of the Business Owner/Corporate Secretary AND 1 valid ID of the Authorized Representative (1 photocopy each)',
         issuingOffice: 'Government Agency (Passport, UMID, Driver’s License, PhilID, etc.)',
-        issuingOfficeShort: 'Government ID',
-        legalBasis: 'Required if transacting through representative (Item 2)',
+        issuingOfficeShort: '1 Valid ID Only',
+        legalBasis: 'Required if transacting through representative (1 Valid ID only)',
         isMandatory: true,
         category: 'representative',
-        copyType: '1 photocopy each',
+        copyType: '1 Valid ID only (1 photocopy each)',
         accept: '.pdf,.jpg,.jpeg,.png',
         formats: 'PDF, JPG, PNG (Max 10MB)'
       });
@@ -586,85 +569,257 @@ export const getArtaRequirements = (formData = {}) => {
 
     return list;
   } else {
-    // RENEWAL Requirements
-    return [
-      {
-        id: 'gross_sales_basis',
-        itemNo: 1,
-        code: 'FIN-01',
-        title: 'Basis for Gross Sales (BIR ITR / AFS / Sworn Statement)',
-        subtitle: 'Previous year Audited Financial Statements, BIR Form 1701/1702 Annual ITR, or Sworn Statement of Gross Receipts',
-        issuingOffice: 'BIR / CPA Certified',
-        issuingOfficeShort: 'BIR / CPA',
-        legalBasis: 'RA 11032 / Unified Tax Assessment',
+    // RENEWAL Requirements (Official City of Bogo BPLO Renewal Slip + Representative 1 & 2)
+    const renewalList = [];
+
+    // Last year's Income Statement (Notarized) for those without BIR / BIR 1701 / BIR 2551Q Or 2550Q (1st, 2nd, 3rd & 4th Q) Remittances
+    renewalList.push({
+      id: 'gross_sales_basis',
+      itemNo: 2,
+      code: 'FIN-REN-02',
+      title: "Last year's Income Statement (Notarized) for those without BIR / BIR 1701 / BIR 2551Q Or 2550Q (1st, 2nd, 3rd & 4th Q) Remittances",
+      subtitle: "Notarized Income Statement (if without BIR) OR BIR Form 1701 / BIR 2551Q or 2550Q (1st, 2nd, 3rd & 4th Quarter) Remittances",
+      issuingOffice: 'BIR / Notary Public',
+      issuingOfficeShort: 'BIR / Notary',
+      legalBasis: 'BPLO Renewal Requirements Item 2',
+      isMandatory: true,
+      category: 'core',
+      copyType: 'Notarized / BIR Return',
+      accept: '.pdf,.jpg,.jpeg,.png',
+      formats: 'PDF, JPG, PNG (Max 10MB)'
+    });
+
+    // 3) Barangay Clearance
+    renewalList.push({
+      id: 'barangay_clearance',
+      itemNo: 3,
+      code: 'BRGY-REN-03',
+      title: 'Barangay Clearance',
+      subtitle: 'Current year Barangay Business Clearance from host barangay where the business is located',
+      issuingOffice: 'Host Barangay Council',
+      issuingOfficeShort: 'Barangay',
+      legalBasis: 'BPLO Renewal Requirements Item 3',
+      isMandatory: true,
+      category: 'core',
+      copyType: 'Original copy',
+      accept: '.pdf,.jpg,.jpeg,.png',
+      formats: 'PDF, JPG, PNG (Max 10MB)'
+    });
+
+    // 4) Residence Certificate / Corporate Cedula
+    renewalList.push({
+      id: 'cedula',
+      itemNo: 4,
+      code: 'CTO-REN-04',
+      title: 'Residence Certificate / Corporate Cedula',
+      subtitle: 'Current year Community Tax Certificate (CTC / Cedula) of owner or Corporate Cedula for business entity',
+      issuingOffice: "Treasurer's Office / Barangay",
+      issuingOfficeShort: 'Treasurer / Brgy',
+      legalBasis: 'BPLO Renewal Requirements Item 4',
+      isMandatory: true,
+      category: 'core',
+      copyType: 'Original copy',
+      accept: '.pdf,.jpg,.jpeg,.png',
+      formats: 'PDF, JPG, PNG (Max 10MB)'
+    });
+
+    // 5) Notarized Contract of Lease, if place of business is rented
+    // 6) Lessor's Business Permit, if renting
+    if (isRented) {
+      renewalList.push({
+        id: 'lease_contract',
+        itemNo: 5,
+        code: 'LSE-REN-05',
+        title: 'Notarized Contract of Lease (if place of business is rented)',
+        subtitle: 'Duly notarized Contract of Lease between property lessor and business owner',
+        issuingOffice: 'Notary Public / Lessor',
+        issuingOfficeShort: 'Notary / Lessor',
+        legalBasis: 'BPLO Renewal Requirements Item 5',
         isMandatory: true,
-        category: 'renewal',
-        copyType: 'Official ITR / AFS',
+        category: 'lease',
+        copyType: 'Notarized copy',
         accept: '.pdf,.jpg,.jpeg,.png',
         formats: 'PDF, JPG, PNG (Max 10MB)'
-      },
-      {
-        id: 'previous_permit',
-        itemNo: 2,
-        code: 'PERM-01',
-        title: "Previous Year Mayor's Permit & Official Receipt (OR)",
-        subtitle: 'Preceding calendar year Business Permit plate/certificate and proof of full local tax payment',
-        issuingOffice: 'BPLO / City Treasurer',
-        issuingOfficeShort: 'BPLO / Treasurer',
-        legalBasis: 'BPLS Standard Renewal Check',
+      });
+
+      renewalList.push({
+        id: 'lessor_permit',
+        itemNo: 6,
+        code: 'LSE-REN-06',
+        title: "Lessor's Business Permit (if renting)",
+        subtitle: "Valid Mayor's / Business Permit of the property lessor",
+        issuingOffice: "BPLO (Lessor's Jurisdiction)",
+        issuingOfficeShort: 'BPLO',
+        legalBasis: 'BPLO Renewal Requirements Item 6',
         isMandatory: true,
-        category: 'renewal',
-        copyType: 'Photocopy of Permit & OR',
+        category: 'lease',
+        copyType: 'Photocopy',
         accept: '.pdf,.jpg,.jpeg,.png',
         formats: 'PDF, JPG, PNG (Max 10MB)'
-      },
-      {
-        id: 'barangay_clearance',
-        itemNo: 3,
-        code: 'BRGY-01',
-        title: 'Current Year Barangay Business Clearance',
-        subtitle: 'Barangay clearance from host barangay where the establishment is located',
-        issuingOffice: 'Host Barangay Council',
-        issuingOfficeShort: 'Barangay',
-        legalBasis: 'LGC Sec. 152(c)',
+      });
+    }
+
+    // 7) Stall Clearance (if business is located at the Bogo City Public Market)
+    if (isMarketStall) {
+      renewalList.push({
+        id: 'stall_clearance',
+        itemNo: 7,
+        code: 'MKT-REN-07',
+        title: 'Stall Clearance (if business is located at the Bogo City Public Market)',
+        subtitle: 'Official Stall Clearance issued by the Bogo City Public Market Administration',
+        issuingOffice: 'Bogo City Public Market Office',
+        issuingOfficeShort: 'Public Market',
+        legalBasis: 'BPLO Renewal Requirements Item 7',
         isMandatory: true,
-        category: 'renewal',
+        category: 'market',
         copyType: 'Original copy',
         accept: '.pdf,.jpg,.jpeg,.png',
         formats: 'PDF, JPG, PNG (Max 10MB)'
-      },
-      {
-        id: 'sanitary_permit',
-        itemNo: 4,
-        code: 'CHO-01',
-        title: 'Annual Sanitary Permit Renewal',
-        subtitle: 'Health inspection clearance and valid health cards for current calendar year',
-        issuingOffice: 'City Health Office (CHO)',
-        issuingOfficeShort: 'City Health',
-        legalBasis: 'PD 856 Sanitation Code',
-        isMandatory: true,
-        category: 'renewal',
-        copyType: 'Official permit',
-        accept: '.pdf,.jpg,.jpeg,.png',
-        formats: 'PDF, JPG, PNG (Max 10MB)'
-      },
-      {
-        id: 'fsic',
-        itemNo: 5,
-        code: 'BFP-01',
-        title: 'Fire Safety Inspection Certificate (FSIC) for Renewal',
-        subtitle: 'Bureau of Fire Protection certification for calendar year operations',
-        issuingOffice: 'Bureau of Fire Protection (BFP)',
-        issuingOfficeShort: 'BFP',
-        legalBasis: 'Revised Fire Code RA 9514',
-        isMandatory: false,
-        isToFollow: true,
-        category: 'renewal',
-        copyType: 'BFP Certificate',
-        accept: '.pdf,.jpg,.jpeg,.png',
-        formats: 'PDF, JPG, PNG (Max 10MB)'
+      });
+    }
+
+    // 8) Real Property Tax Clearance; (Treasurer's Office)
+    renewalList.push({
+      id: 'rpt_clearance',
+      itemNo: 8,
+      code: 'CTO-REN-08',
+      title: "Real Property Tax Clearance (Treasurer's Office)",
+      subtitle: "Current year Real Property Tax Clearance issued by the City Treasurer's Office",
+      issuingOffice: "Treasurer's Office",
+      issuingOfficeShort: 'City Treasurer',
+      legalBasis: 'BPLO Renewal Requirements Item 8',
+      isMandatory: true,
+      category: 'core',
+      copyType: 'Official clearance',
+      accept: '.pdf,.jpg,.jpeg,.png',
+      formats: 'PDF, JPG, PNG (Max 10MB)'
+    });
+
+    // 9) Sanitary Permit; (City Health Office)
+    renewalList.push({
+      id: 'sanitary_permit',
+      itemNo: 9,
+      code: 'CHO-REN-09',
+      title: 'Sanitary Permit (City Health Office)',
+      subtitle: 'Annual Sanitary Permit and health clearance issued by the City Health Office',
+      issuingOffice: 'City Health Office (CHO)',
+      issuingOfficeShort: 'City Health',
+      legalBasis: 'BPLO Renewal Requirements Item 9',
+      isMandatory: true,
+      category: 'core',
+      copyType: 'Official permit',
+      accept: '.pdf,.jpg,.jpeg,.png',
+      formats: 'PDF, JPG, PNG (Max 10MB)'
+    });
+
+    // 10) Fire Safety Inspection Certificate; (BFP)
+    renewalList.push({
+      id: 'fsic',
+      itemNo: 10,
+      code: 'BFP-REN-10',
+      title: 'Fire Safety Inspection Certificate (BFP)',
+      subtitle: 'Fire Safety Inspection Certificate (FSIC) for Business Permit Renewal from Bureau of Fire Protection',
+      issuingOffice: 'Bureau of Fire Protection (BFP)',
+      issuingOfficeShort: 'BFP',
+      legalBasis: 'BPLO Renewal Requirements Item 10',
+      isMandatory: true,
+      category: 'core',
+      copyType: 'BFP Certificate',
+      accept: '.pdf,.jpg,.jpeg,.png',
+      formats: 'PDF, JPG, PNG (Max 10MB)'
+    });
+
+    // 11) CENRO Business Clearance; (CENRO)
+    renewalList.push({
+      id: 'cenro_clearance',
+      itemNo: 11,
+      code: 'CENRO-REN-11',
+      title: 'CENRO Business Clearance (CENRO)',
+      subtitle: 'Environmental & solid waste management clearance issued by CENRO',
+      issuingOffice: 'City Environment & Natural Resources Office (CENRO)',
+      issuingOfficeShort: 'CENRO',
+      legalBasis: 'BPLO Renewal Requirements Item 11',
+      isMandatory: true,
+      category: 'core',
+      copyType: 'Official clearance',
+      accept: '.pdf,.jpg,.jpeg,.png',
+      formats: 'PDF, JPG, PNG (Max 10MB)'
+    });
+
+    // 12) Others: AMLC Registration / Vet Certificate / COC / CDA / PTR / MNRC
+    renewalList.push({
+      id: 'renewal_others',
+      itemNo: 12,
+      code: 'OTH-REN-12',
+      title: 'Others: AMLC Registration / Vet Certificate / COC / CDA / PTR / MNRC',
+      subtitle: 'Applicable special regulatory registration or certificate (AMLC, Veterinary Certificate, COC, CDA, PTR, or MNRC)',
+      issuingOffice: 'Applicable Regulatory Agency / City Treasurer',
+      issuingOfficeShort: 'Special Agency',
+      legalBasis: 'BPLO Renewal Requirements Item 12',
+      isMandatory: false,
+      category: 'specific',
+      copyType: '1 original / 1 photocopy',
+      accept: '.pdf,.jpg,.jpeg,.png',
+      formats: 'PDF, JPG, PNG (Max 10MB)'
+    });
+
+    // Also include any specifically toggled special business types (a to m) if selected
+    SPECIAL_BUSINESS_TYPES_CONFIG.forEach(item => {
+      if (selectedSpecialKeys.includes(item.id) || selectedSpecialKeys.includes(item.letter)) {
+        renewalList.push({
+          id: item.id,
+          itemNo: `12-${item.letter.toUpperCase()}`,
+          code: item.code,
+          title: `${item.title} (${item.label})`,
+          subtitle: item.subtitle,
+          issuingOffice: item.agency,
+          issuingOfficeShort: item.agencyShort,
+          legalBasis: `BPLO Renewal Item 12 (${item.letter})`,
+          isMandatory: true,
+          category: 'specific',
+          copyType: item.copyType,
+          accept: '.pdf,.jpg,.jpeg,.png',
+          formats: 'PDF, JPG, PNG (Max 10MB)'
+        });
       }
-    ];
+    });
+
+    // If transacting through a representative (Items 1 & 2)
+    if (isRepresentative) {
+      renewalList.push({
+        id: 'rep_authorization',
+        itemNo: 'Rep-1',
+        code: 'REP-01',
+        title: "Authorization letter executed by the Business Owner or Secretary's Certificate indicating specific transaction",
+        subtitle: "Duly signed Authorization Letter from the Business Owner OR Secretary's Certificate indicating the specific renewal transaction",
+        issuingOffice: 'Business Owner / Corporate Secretary',
+        issuingOfficeShort: 'Owner / Corp Sec',
+        legalBasis: 'Required if transacting through a representative (Item 1)',
+        isMandatory: true,
+        category: 'representative',
+        copyType: 'Original signed copy',
+        accept: '.pdf,.jpg,.jpeg,.png',
+        formats: 'PDF, JPG, PNG (Max 10MB)'
+      });
+
+      renewalList.push({
+        id: 'rep_valid_ids',
+        itemNo: 'Rep-2',
+        code: 'REP-02',
+        title: '1 Valid Government ID Only (Business Owner/Corporate Secretary & Representative)',
+        subtitle: '1 Valid ID only: Any 1 valid government-issued ID of the Business Owner/Corporate Secretary AND 1 valid ID of the Authorized Representative (1 photocopy each)',
+        issuingOffice: 'Government Agency',
+        issuingOfficeShort: '1 Valid ID Only',
+        legalBasis: 'Required if transacting through a representative (1 Valid ID only)',
+        isMandatory: true,
+        category: 'representative',
+        copyType: '1 Valid ID only (1 photocopy each)',
+        accept: '.pdf,.jpg,.jpeg,.png',
+        formats: 'PDF, JPG, PNG (Max 10MB)'
+      });
+    }
+
+    return renewalList;
   }
 };
 
@@ -848,7 +1003,11 @@ export default function ArtaDocumentUpload({
           <div className="flex flex-wrap items-center gap-2">
             <h3 className="font-bold text-slate-900 text-base sm:text-lg flex items-center gap-2">
               <FileBadge className="w-5 h-5 text-[#159847]" />
-              <span>Documentary Requirements for New Business Permit</span>
+              <span>
+                {formData.applicationType === 'Renewal'
+                  ? 'Documentary Requirements for Business Permit Renewal'
+                  : 'Documentary Requirements for New Business Permit'}
+              </span>
             </h3>
             <span className="inline-flex items-center gap-1 text-[11px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
               <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
@@ -962,7 +1121,7 @@ export default function ArtaDocumentUpload({
             />
             <div className="min-w-0">
               <span className="text-xs block truncate">Through Representative</span>
-              <span className="text-[10px] text-gray-400 block font-normal">Adds Auth Letter & IDs</span>
+              <span className="text-[10px] text-gray-400 block font-normal">Adds Auth Letter & 1 Valid ID Only</span>
             </div>
           </label>
         </div>
@@ -1377,58 +1536,78 @@ export default function ArtaDocumentUpload({
             <div className="p-6 overflow-y-auto space-y-4 text-xs font-mono text-slate-900 leading-relaxed bg-[#FFFDF9]">
               <div className="text-center border-b border-slate-300 pb-3">
                 <h3 className="font-bold text-sm tracking-wide uppercase">
-                  Documentary Requirements for New Business Permit
+                  {formData.applicationType === 'Renewal'
+                    ? 'Documentary Requirements for Business Permit Renewal'
+                    : 'Documentary Requirements for New Business Permit'}
                 </h3>
                 <p className="text-[11px] text-gray-600 mt-0.5">City of Bogo • Business Permit and Licensing Office</p>
               </div>
 
-              {/* Items 1 to 15 */}
-              <div className="space-y-1.5 text-[11px]">
-                <p>1) Filled up Unified Business Permit Application Form;</p>
-                <p>2) DTI Registration for Single Proprietorship; SEC Certificate for Partnership, Corporation, and One Person Corporation; CDA Registration for Cooperatives; and Franchise Agreement, if franchisee;</p>
-                <p>3) Zoning Clearance; (City Planning & Development Office)</p>
-                <p>4) Locational Clearance; (City Planning & Development Office)</p>
-                <p>5) Occupancy Permit; (OBO)</p>
-                <p>6) CENRO Business Clearance; (CENRO)</p>
-                <p>7) Real Property Tax Clearance; (Treasurer's Office)</p>
-                <p>8) Residence Certificate / Corporate Cedula (original copy);</p>
-                <p>9) Barangay Clearance (original copy);</p>
-                <p>10) Notarized Contract of Lease, if place of business is rented;</p>
-                <p>11) Lessor's Business Permit, if renting;</p>
-                <p>12) Stall Clearance (if business is located at the Bogo City Public Market);</p>
-                <p>13) Sanitary Permit; (City Health Office)</p>
-                <p>14) Inspection Report from BPLO;</p>
-                <p>15) Fire Safety Inspection Certificate (to follow after all requirements above are completed);</p>
-              </div>
-
-              {/* Specific Type of Business */}
-              <div className="pt-2 border-t border-slate-200">
-                <p className="font-bold text-[11px] mb-1">
-                  Additional Requirements for Specific Type of Business: (1 original copy / 1 photocopy copy)
-                </p>
-                <div className="space-y-1 text-[10.5px] pl-2 text-slate-800">
-                  <p>a. Gasoline Stations – Environmental Compliance Certificate (ECC), COC (Certificate of Compliance), Special Use Permit</p>
-                  <p>b. Junkshops – Barangay Resolution</p>
-                  <p>c. Quarry – Governor's Permit</p>
-                  <p>d. Piggery and Poultry Farms – Council Resolution and Environmental Compliance Certificate (ECC)</p>
-                  <p>e. Water Refilling Stations – Bogo Water District Clearance</p>
-                  <p>f. Subdivisions – Council Resolution</p>
-                  <p>g. Online Sabong – Council Resolution</p>
-                  <p>h. Restaurants, Beach Resorts and Accommodations – Tourism Accreditation</p>
-                  <p>i. Meat and Poultry Products – Vet Certificate</p>
-                  <p>j. AMLC Registration</p>
-                  <p>k. MNRC Registration</p>
-                  <p>l. PTR</p>
-                  <p>m. Radio Stations, Private Landing Strips, Abattoir/Slaughterhouse, Cockpits, Landfill, Night Clubs, Cabarets, Bars, Videoke Bar and Pub Houses – Special Use Permit</p>
+              {formData.applicationType === 'Renewal' ? (
+                /* RENEWAL Items matching official photo (without Application Form item) */
+                <div className="space-y-1.5 text-[11px]">
+                  <p>1) Last year's Income Statement (Notarized) for those without BIR / BIR 1701 / BIR 2551Q Or 2550Q (1st, 2nd, 3rd & 4th Q) Remittances;</p>
+                  <p>2) Barangay Clearance;</p>
+                  <p>3) Residence Certificate / Corporate Cedula;</p>
+                  <p>4) Notarized Contract of Lease, if place of business is rented;</p>
+                  <p>5) Lessor's Business Permit, if renting;</p>
+                  <p>6) Stall Clearance (if business is located at the Bogo City Public Market);</p>
+                  <p>7) Real Property Tax Clearance; (Treasurer's Office)</p>
+                  <p>8) Sanitary Permit; (City Health Office)</p>
+                  <p>9) Fire Safety Inspection Certificate; (BFP)</p>
+                  <p>10) CENRO Business Clearance; (CENRO)</p>
+                  <p>11) Others: AMLC Registration / Vet Certificate / COC / CDA / PTR / MNRC</p>
                 </div>
-              </div>
+              ) : (
+                <>
+                  {/* NEW Items (without Application Form item) */}
+                  <div className="space-y-1.5 text-[11px]">
+                    <p>1) DTI Registration for Single Proprietorship; SEC Certificate for Partnership, Corporation, and One Person Corporation; CDA Registration for Cooperatives; and Franchise Agreement, if franchisee;</p>
+                    <p>2) Zoning Clearance; (City Planning & Development Office)</p>
+                    <p>3) Locational Clearance; (City Planning & Development Office)</p>
+                    <p>4) Occupancy Permit; (OBO)</p>
+                    <p>5) CENRO Business Clearance; (CENRO)</p>
+                    <p>6) Real Property Tax Clearance; (Treasurer's Office)</p>
+                    <p>7) Residence Certificate / Corporate Cedula (original copy);</p>
+                    <p>8) Barangay Clearance (original copy);</p>
+                    <p>9) Notarized Contract of Lease, if place of business is rented;</p>
+                    <p>10) Lessor's Business Permit, if renting;</p>
+                    <p>11) Stall Clearance (if business is located at the Bogo City Public Market);</p>
+                    <p>12) Sanitary Permit; (City Health Office)</p>
+                    <p>13) Inspection Report from BPLO;</p>
+                    <p>14) Fire Safety Inspection Certificate (to follow after all requirements above are completed);</p>
+                  </div>
+
+                  {/* Specific Type of Business */}
+                  <div className="pt-2 border-t border-slate-200">
+                    <p className="font-bold text-[11px] mb-1">
+                      Additional Requirements for Specific Type of Business: (1 original copy / 1 photocopy copy)
+                    </p>
+                    <div className="space-y-1 text-[10.5px] pl-2 text-slate-800">
+                      <p>a. Gasoline Stations – Environmental Compliance Certificate (ECC), COC (Certificate of Compliance), Special Use Permit</p>
+                      <p>b. Junkshops – Barangay Resolution</p>
+                      <p>c. Quarry – Governor's Permit</p>
+                      <p>d. Piggery and Poultry Farms – Council Resolution and Environmental Compliance Certificate (ECC)</p>
+                      <p>e. Water Refilling Stations – Bogo Water District Clearance</p>
+                      <p>f. Subdivisions – Council Resolution</p>
+                      <p>g. Online Sabong – Council Resolution</p>
+                      <p>h. Restaurants, Beach Resorts and Accommodations – Tourism Accreditation</p>
+                      <p>i. Meat and Poultry Products – Vet Certificate</p>
+                      <p>j. AMLC Registration</p>
+                      <p>k. MNRC Registration</p>
+                      <p>l. PTR</p>
+                      <p>m. Radio Stations, Private Landing Strips, Abattoir/Slaughterhouse, Cockpits, Landfill, Night Clubs, Cabarets, Bars, Videoke Bar and Pub Houses – Special Use Permit</p>
+                    </div>
+                  </div>
+                </>
+              )}
 
               {/* Representative */}
               <div className="pt-2 border-t border-slate-200 text-[10.5px]">
                 <p className="font-bold text-[11px] mb-1">If transacting through a representative:</p>
                 <div className="space-y-1 pl-2 text-slate-800">
                   <p>1) Authorization letter executed by the Business Owner or Secretary's Certificate indicating specific transaction;</p>
-                  <p>2) Any valid ID of the Business Owner or Corporate Secretary and Authorized Representative (1 photocopy each).</p>
+                  <p>2) 1 Valid ID only of the Business Owner or Corporate Secretary and Authorized Representative (1 photocopy each).</p>
                 </div>
               </div>
             </div>

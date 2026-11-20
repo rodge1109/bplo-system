@@ -215,6 +215,40 @@ export default function AcknowledgementReceiptModal({
                 <span className="text-gray-500 block font-normal">Declared Business Address:</span>
                 <span className="font-semibold text-slate-900">{receiptData.businessAddress || 'Declared Address'}</span>
               </div>
+              {(receiptData.isRented || receiptData.is_rented) && (
+                <div className="sm:col-span-2 pt-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5">
+                  <div>
+                    <span className="text-gray-500 block font-normal">20.1 Lessor's Name:</span>
+                    <span className="font-semibold text-slate-900">
+                      {receiptData.lessorName || receiptData.lessor_name || 'N/A'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 block font-normal">20.2 Monthly Rental:</span>
+                    <span className="font-semibold text-slate-900 font-mono">
+                      ₱{Number(receiptData.monthlyRental || receiptData.monthly_rental || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <span className="text-gray-500 block font-normal">20.3 Lessor's Address:</span>
+                    <span className="font-semibold text-slate-900">
+                      {receiptData.lessorAddress || receiptData.lessor_address || 'N/A'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 block font-normal">20.4 Lessor's Contact Number:</span>
+                    <span className="font-semibold text-slate-900">
+                      {receiptData.lessorContactNo || receiptData.lessor_contact_no || 'N/A'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-gray-500 block font-normal">20.5 Lessor's Email Address:</span>
+                    <span className="font-semibold text-slate-900">
+                      {receiptData.lessorEmailAddress || receiptData.lessor_email_address || 'N/A'}
+                    </span>
+                  </div>
+                </div>
+              )}
               {receiptData.platformFeePayment && (
                 <div className="sm:col-span-2 pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2">
                   <div>

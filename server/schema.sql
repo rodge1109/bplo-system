@@ -106,9 +106,28 @@ CREATE TABLE IF NOT EXISTS bplo_application (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Ensure tenant_code and uploaded_documents columns exist if table was created previously
+-- Ensure tenant_code, rental/lessor, and uploaded_documents columns exist if table was created previously
 ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS tenant_code VARCHAR(50) DEFAULT 'BOGO';
-ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS uploaded_documents JSONB;
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS is_rented BOOLEAN DEFAULT FALSE;
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS lessor_name VARCHAR(255);
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS monthly_rental NUMERIC(12, 2);
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS lessor_address TEXT;
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS lessor_contact_no VARCHAR(50);
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS lessor_email_address VARCHAR(255);
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS is_market_stall BOOLEAN DEFAULT FALSE;
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS is_franchisee BOOLEAN DEFAULT FALSE;
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS is_representative BOOLEAN DEFAULT FALSE;
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS representative_name VARCHAR(255);
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS representative_position VARCHAR(100);
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS special_business_types JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS uploaded_documents JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS platform_fee_payment JSONB;
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS assessment_items JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS assessment_pdf JSONB;
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS total_assessed NUMERIC(12, 2);
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS permit_no VARCHAR(100);
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS plate_no VARCHAR(100);
+ALTER TABLE bplo_application ADD COLUMN IF NOT EXISTS or_no VARCHAR(100);
 
 -- 3. Business Activities Child Table (Multi-tenant)
 CREATE TABLE IF NOT EXISTS bplo_business_activities (

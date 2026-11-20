@@ -2077,10 +2077,18 @@ export function BusinessPermitForm({
 
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value
-    }));
+    const lessorFields = ['lessorName', 'monthlyRental', 'lessorAddress', 'lessorContactNo', 'lessorEmailAddress'];
+    setFormData(prev => {
+      const next = {
+        ...prev,
+        [name]: type === 'checkbox' ? checked : value
+      };
+      // Automatically mark isRented = true if applicant types into any 20.1 - 20.5 lessor field
+      if (lessorFields.includes(name) && String(value || '').trim().length > 0) {
+        next.isRented = true;
+      }
+      return next;
+    });
   };
 
   const handleCopyBusinessAddress = (e) => {
@@ -2186,12 +2194,25 @@ export function BusinessPermitForm({
           num_employees_male: parseInt(formData.numEmployeesMale) || 0,
           num_employees_female: parseInt(formData.numEmployeesFemale) || 0,
           num_employees_bogo_residing: parseInt(formData.numEmployeesBogoResiding) || 0,
-          is_rented: Boolean(formData.isRented),
-          lessor_name: formData.lessorName || null,
+          is_rented: Boolean(
+            formData.isRented ||
+            formData.lessorName?.trim() ||
+            formData.lessorAddress?.trim() ||
+            formData.monthlyRental
+          ),
+          lessor_name: formData.lessorName?.trim() || null,
           monthly_rental: parseFloat(formData.monthlyRental) || null,
-          lessor_address: formData.lessorAddress || null,
-          lessor_contact_no: formData.lessorContactNo || null,
-          lessor_email_address: formData.lessorEmailAddress || null,
+          lessor_address: formData.lessorAddress?.trim() || null,
+          lessor_contact_no: formData.lessorContactNo?.trim() || null,
+          lessor_email_address: formData.lessorEmailAddress?.trim() || null,
+          is_market_stall: Boolean(formData.isMarketStall),
+          is_franchisee: Boolean(formData.isFranchisee),
+          is_representative: Boolean(formData.isRepresentative),
+          representative_name: formData.representativeName?.trim() || null,
+          representative_position: formData.representativePosition?.trim() || null,
+          special_business_types: formData.specialBusinessTypes || [],
+          uploaded_documents: Object.values(formData.uploadedDocuments || {}),
+          platform_fee_payment: platformFeePayment || editingApplication?.platformFeePayment || null,
           emergency_contact_person: formData.emergencyContactPerson || null,
           emergency_contact_no: formData.emergencyContactNo || null,
           emergency_email_address: formData.emergencyEmailAddress || null,
@@ -2354,7 +2375,28 @@ export function BusinessPermitForm({
           bus_barangay: formData.busBarangay,
           bus_city_municipality: formData.busCityMunicipality,
           bus_province: formData.busProvince,
-          isRented: Boolean(formData.isRented),
+          isRented: Boolean(
+            formData.isRented ||
+            formData.lessorName?.trim() ||
+            formData.lessorAddress?.trim() ||
+            formData.monthlyRental
+          ),
+          is_rented: Boolean(
+            formData.isRented ||
+            formData.lessorName?.trim() ||
+            formData.lessorAddress?.trim() ||
+            formData.monthlyRental
+          ),
+          lessorName: formData.lessorName?.trim() || '',
+          lessor_name: formData.lessorName?.trim() || null,
+          monthlyRental: formData.monthlyRental || '',
+          monthly_rental: parseFloat(formData.monthlyRental) || null,
+          lessorAddress: formData.lessorAddress?.trim() || '',
+          lessor_address: formData.lessorAddress?.trim() || null,
+          lessorContactNo: formData.lessorContactNo?.trim() || '',
+          lessor_contact_no: formData.lessorContactNo?.trim() || null,
+          lessorEmailAddress: formData.lessorEmailAddress?.trim() || '',
+          lessor_email_address: formData.lessorEmailAddress?.trim() || null,
           isMarketStall: Boolean(formData.isMarketStall),
           isFranchisee: Boolean(formData.isFranchisee),
           isRepresentative: Boolean(formData.isRepresentative),
@@ -2886,40 +2928,129 @@ export function BusinessPermitForm({
             </div>
           </div>
 
-          {/* 20. Rental Details */}
-          <div className="pt-2 border-t border-slate-200">
-            <div className="flex items-center gap-3 mb-3">
-              <span className="font-medium text-gray-700 text-xs">20. If Place of Business is Rented:</span>
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-semibold text-[#159847]">
-                <input type="checkbox" name="isRented" checked={formData.isRented} onChange={handleChange} className="w-4 h-4 rounded text-[#159847] focus:ring-[#159847]" />
-                <span>Check if Rented</span>
-              </label>
-            </div>
-
-            {formData.isRented && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-2">
-                <div>
-                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">20.1 Lessor's Name</label>
-                  <input type="text" name="lessorName" value={formData.lessorName} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">20.2 Monthly Rental (Php)</label>
-                  <input type="number" step="0.01" name="monthlyRental" value={formData.monthlyRental} onChange={handleChange} placeholder="0.00" className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
-                </div>
-                <div className="sm:col-span-2 lg:col-span-1">
-                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">20.3 Lessor's Address</label>
-                  <input type="text" name="lessorAddress" value={formData.lessorAddress} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">20.4 Lessor's Contact Number</label>
-                  <input type="tel" name="lessorContactNo" value={formData.lessorContactNo} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
-                </div>
-                <div>
-                  <label className="text-[11px] font-semibold text-gray-600 block mb-1">20.5 Lessor's Email Address</label>
-                  <input type="email" name="lessorEmailAddress" value={formData.lessorEmailAddress} onChange={handleChange} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30" />
+          {/* 20. If Place of Business is Rented, Please Identify the Following (Matching Official Paper Form) */}
+          <div className="pt-3 border-t border-slate-200">
+            <div className="border-2 border-slate-300 rounded-xl overflow-hidden bg-white">
+              {/* Row Header: Item 20 */}
+              <div className="bg-slate-100 px-4 py-2.5 border-b border-slate-300 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="font-bold text-gray-800 text-xs">
+                  20. If Place of Business is Rented, Please Identify the Following:
+                </span>
+                <div className="flex items-center gap-4">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs font-bold text-[#159847]">
+                    <input
+                      type="radio"
+                      name="isRentedRadio"
+                      checked={Boolean(formData.isRented)}
+                      onChange={() => setFormData(p => ({ ...p, isRented: true }))}
+                      className="w-4 h-4 text-[#159847] focus:ring-[#159847]"
+                    />
+                    <span>Yes (Rented)</span>
+                  </label>
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer text-xs font-semibold text-gray-600">
+                    <input
+                      type="radio"
+                      name="isRentedRadio"
+                      checked={!formData.isRented}
+                      onChange={() =>
+                        setFormData(p => ({
+                          ...p,
+                          isRented: false,
+                          lessorName: '',
+                          monthlyRental: '',
+                          lessorAddress: '',
+                          lessorContactNo: '',
+                          lessorEmailAddress: ''
+                        }))
+                      }
+                      className="w-4 h-4 text-gray-600 focus:ring-gray-500"
+                    />
+                    <span>No (Owned)</span>
+                  </label>
                 </div>
               </div>
-            )}
+
+              {/* Row 1: 20.1 Lessor's Name & 20.2 Monthly Rental */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 border-b border-slate-300 divide-y sm:divide-y-0 sm:divide-x divide-slate-300">
+                <div className="sm:col-span-8 p-3">
+                  <label className="text-[11px] font-bold text-gray-700 block mb-1">
+                    20.1 Lessor's Name: {formData.isRented && <span className="text-red-500">*</span>}
+                  </label>
+                  <input
+                    type="text"
+                    name="lessorName"
+                    value={formData.lessorName}
+                    onChange={handleChange}
+                    required={Boolean(formData.isRented)}
+                    placeholder="Full Name of Property Owner / Lessor"
+                    className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847]"
+                  />
+                </div>
+                <div className="sm:col-span-4 p-3">
+                  <label className="text-[11px] font-bold text-gray-700 block mb-1">
+                    20.2 Monthly Rental (Php): {formData.isRented && <span className="text-red-500">*</span>}
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    name="monthlyRental"
+                    value={formData.monthlyRental}
+                    onChange={handleChange}
+                    required={Boolean(formData.isRented)}
+                    placeholder="0.00"
+                    className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-mono font-semibold focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847]"
+                  />
+                </div>
+              </div>
+
+              {/* Row 2: 20.3 Lessor's Address */}
+              <div className="p-3 border-b border-slate-300">
+                <label className="text-[11px] font-bold text-gray-700 block mb-1">
+                  20.3 Lessor's Address: {formData.isRented && <span className="text-red-500">*</span>}
+                </label>
+                <input
+                  type="text"
+                  name="lessorAddress"
+                  value={formData.lessorAddress}
+                  onChange={handleChange}
+                  required={Boolean(formData.isRented)}
+                  placeholder="Complete Address of Lessor (House/Bldg No., Street, Barangay, City/Municipality, Province)"
+                  className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847]"
+                />
+              </div>
+
+              {/* Row 3: 20.4 Lessor's Contact Number & 20.5 Lessor's Email Address */}
+              <div className="grid grid-cols-1 sm:grid-cols-12 divide-y sm:divide-y-0 sm:divide-x divide-slate-300">
+                <div className="sm:col-span-6 p-3">
+                  <label className="text-[11px] font-bold text-gray-700 block mb-1">
+                    20.4 Lessor's Contact Number: {formData.isRented && <span className="text-red-500">*</span>}
+                  </label>
+                  <input
+                    type="tel"
+                    name="lessorContactNo"
+                    value={formData.lessorContactNo}
+                    onChange={handleChange}
+                    required={Boolean(formData.isRented)}
+                    placeholder="e.g. 0917-xxx-xxxx or Landline"
+                    className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847]"
+                  />
+                </div>
+                <div className="sm:col-span-6 p-3">
+                  <label className="text-[11px] font-bold text-gray-700 block mb-1">
+                    20.5 Lessor's Email Address:
+                  </label>
+                  <input
+                    type="email"
+                    name="lessorEmailAddress"
+                    value={formData.lessorEmailAddress}
+                    onChange={handleChange}
+                    placeholder="lessor@example.com"
+                    className="w-full p-2 border border-slate-300 rounded-lg bg-white text-xs font-medium focus:ring-2 focus:ring-[#159847]/30 focus:border-[#159847]"
+                  />
+                </div>
+              </div>
+            </div>
 
             {/* 20.B Location Special Status & Representative */}
             <div className="pt-3 border-t border-slate-200 grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -2947,7 +3078,7 @@ export function BusinessPermitForm({
                 />
                 <div>
                   <span className="text-[#159847] font-bold block">Transacting through an Authorized Representative</span>
-                  <span className="text-[11px] text-gray-500 font-normal">Requires Authorization Letter / Secretary's Certificate & Valid IDs</span>
+                  <span className="text-[11px] text-gray-500 font-normal">Requires Authorization Letter / Secretary's Certificate & <strong>1 Valid ID only</strong> (1 photocopy each)</span>
                 </div>
               </label>
             </div>
