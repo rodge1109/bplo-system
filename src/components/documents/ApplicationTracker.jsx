@@ -50,6 +50,7 @@ export default function ApplicationTracker({
   const [customDocTitle, setCustomDocTitle] = useState('');
   const [showUploadDrawer, setShowUploadDrawer] = useState(false);
   const [replacingDoc, setReplacingDoc] = useState(null);
+  const [showAssessmentPdfViewer, setShowAssessmentPdfViewer] = useState(false);
 
   // Load recent applications from localStorage
   useEffect(() => {
@@ -140,20 +141,32 @@ export default function ApplicationTracker({
           }
         }
 
-        let assessmentItems = data.assessment_items || null;
+        let assessmentItems = Array.isArray(data.assessment_items) && data.assessment_items.length > 0 ? data.assessment_items : null;
         let totalAssessed = data.total_assessed || null;
-        if (!assessmentItems && data.reference_no) {
+        let assessmentPdf = data.assessment_pdf || null;
+
+        if (data.reference_no) {
           try {
             const cachedAssessment = localStorage.getItem(`bplo_assessment_${data.reference_no}`);
             if (cachedAssessment) {
-              assessmentItems = JSON.parse(cachedAssessment);
-              if (!totalAssessed && Array.isArray(assessmentItems)) {
-                totalAssessed = assessmentItems.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
+              const parsedItems = JSON.parse(cachedAssessment);
+              if (Array.isArray(parsedItems) && parsedItems.length > 0) {
+                assessmentItems = parsedItems;
+                totalAssessed = parsedItems.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
               }
+            }
+            const cachedPdf = localStorage.getItem(`bplo_assessment_pdf_${data.reference_no}`);
+            if (cachedPdf) {
+              assessmentPdf = JSON.parse(cachedPdf);
             }
           } catch(e) {}
         }
 
+        if (!totalAssessed && Array.isArray(assessmentItems) && assessmentItems.length > 0) {
+          totalAssessed = assessmentItems.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
+        }
+
+        setShowAssessmentPdfViewer(false);
         setApplicationData({
           ...data,
           referenceNo: data.reference_no,
@@ -165,6 +178,7 @@ export default function ApplicationTracker({
           business_activities: activities,
           assessment_items: assessmentItems,
           total_assessed: totalAssessed,
+          assessment_pdf: assessmentPdf,
           submittedAt: data.created_at || data.date_of_application,
           status: data.status || 'Pending'
         });
@@ -176,14 +190,36 @@ export default function ApplicationTracker({
 
         if (local) {
           let localDocs = local.documents || [];
+          let localAssessmentItems = local.assessment_items || local.assessmentItems || null;
+          let localAssessmentPdf = local.assessment_pdf || local.assessmentPdf || null;
+          let localTotalAssessed = local.total_assessed || null;
           try {
             const direct = localStorage.getItem(`bplo_docs_${local.referenceNo}`);
             if (direct) {
               const parsed = JSON.parse(direct);
               if (Array.isArray(parsed) && parsed.length > 0) localDocs = parsed;
             }
+            const cachedAssessment = localStorage.getItem(`bplo_assessment_${local.referenceNo}`);
+            if (cachedAssessment) {
+              const parsedItems = JSON.parse(cachedAssessment);
+              if (Array.isArray(parsedItems) && parsedItems.length > 0) {
+                localAssessmentItems = parsedItems;
+                localTotalAssessed = parsedItems.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0);
+              }
+            }
+            const cachedPdf = localStorage.getItem(`bplo_assessment_pdf_${local.referenceNo}`);
+            if (cachedPdf) {
+              localAssessmentPdf = JSON.parse(cachedPdf);
+            }
           } catch(e) {}
-          setApplicationData({ ...local, documents: localDocs });
+          setShowAssessmentPdfViewer(false);
+          setApplicationData({
+            ...local,
+            documents: localDocs,
+            assessment_items: localAssessmentItems,
+            total_assessed: localTotalAssessed,
+            assessment_pdf: localAssessmentPdf
+          });
         } else {
           setErrorMessage(`No permit application found matching reference number "${targetRef}". Please verify the code.`);
         }
@@ -562,6 +598,116 @@ export default function ApplicationTracker({
 
                 </div>
               </div>
+
+              {/* Official Business Permit Assessment / Tax Order of Payment (TOP) Card */}
+              {((Array.isArray(applicationData.assessment_items) && applicationData.assessment_items.length > 0) ||
+                applicationData.assessment_pdf ||
+                applicationData.total_assessed) && (
+                <div className="border-2 border-emerald-300 rounded-2xl overflow-hidden bg-white shadow-xs">
+                  <div className="bg-emerald-50/90 px-5 py-3.5 border-b border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-extrabold text-slate-900 text-xs sm:text-sm uppercase tracking-wide">
+                          Official Business Permit Assessment (Tax Order of Payment)
+                        </span>
+                        <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-[#159847] text-white">
+                          Issued by BPLO Admin
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-emerald-800 mt-0.5">
+                        Itemized breakdown of local business taxes and regulatory fees assessed for your application.
+                      </p>
+                    </div>
+
+                    {applicationData.assessment_pdf?.url && (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setShowAssessmentPdfViewer(!showAssessmentPdfViewer)}
+                          className="px-3.5 py-1.5 rounded-xl bg-white hover:bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        >
+                          <FileText className="w-3.5 h-3.5 text-[#159847]" />
+                          <span>{showAssessmentPdfViewer ? 'Hide Assessment PDF' : 'Preview Assessment PDF'}</span>
+                        </button>
+                        <a
+                          href={applicationData.assessment_pdf.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-3.5 py-1.5 rounded-xl bg-[#159847] hover:bg-[#12823c] text-white text-xs font-bold flex items-center gap-1.5 transition-colors"
+                        >
+                          <span>Open / Download PDF</span>
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </a>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Optional Inline PDF Viewer */}
+                  {showAssessmentPdfViewer && applicationData.assessment_pdf?.url && (
+                    <div className="p-4 bg-slate-50 border-b border-emerald-200">
+                      <iframe
+                        src={applicationData.assessment_pdf.url}
+                        title="Official Business Assessment Form PDF"
+                        className="w-full h-96 rounded-xl border border-slate-200 bg-white"
+                      />
+                    </div>
+                  )}
+
+                  {/* Itemized Assessment Breakdown Table */}
+                  {Array.isArray(applicationData.assessment_items) && applicationData.assessment_items.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-[#159847] text-white font-semibold">
+                          <tr>
+                            <th className="p-3 w-10 text-center">#</th>
+                            <th className="p-3">Fee Description (Particulars)</th>
+                            <th className="p-3 w-36">Category</th>
+                            <th className="p-3 w-36 text-right">Amount (PHP)</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {applicationData.assessment_items.map((item, idx) => (
+                            <tr key={item.id || idx} className="hover:bg-slate-50/70">
+                              <td className="p-3 text-center text-gray-400 font-mono text-[11px]">
+                                {idx + 1}
+                              </td>
+                              <td className="p-3">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {item.chargeCode && (
+                                    <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                                      {item.chargeCode}
+                                    </span>
+                                  )}
+                                  <span className="font-semibold text-slate-800">{item.description}</span>
+                                </div>
+                              </td>
+                              <td className="p-3">
+                                <span className="inline-flex items-center text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                  {item.category || 'Regulatory Fees'}
+                                </span>
+                              </td>
+                              <td className="p-3 text-right font-mono font-bold text-slate-800">
+                                Php {Number(item.amount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          ))}
+                          <tr className="bg-emerald-50/90 font-bold text-slate-900 border-t-2 border-emerald-300">
+                            <td colSpan={3} className="p-3.5 text-xs sm:text-sm text-slate-800">
+                              <span className="font-extrabold uppercase tracking-wide">TOTAL AMOUNT DUE</span>
+                            </td>
+                            <td className="p-3.5 text-right text-sm sm:text-base text-[#1B4332] font-mono font-extrabold">
+                              Php {Number(
+                                applicationData.total_assessed ||
+                                applicationData.assessment_items.reduce((s, c) => s + (parseFloat(c.amount) || 0), 0)
+                              ).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Business Summary Card (4 Columns) */}
               <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/70 text-xs">

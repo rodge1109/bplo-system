@@ -769,15 +769,18 @@ INSTRUCTIONS FOR APPLICANT:
   const handleStampAllVerified = handleAcceptAllDocs;
 
   // Assessment Charges Management Handlers (Add, Edit, Delete, Recalculate, Reset)
-  const persistCharges = (updatedCharges) => {
+  const persistCharges = async (updatedCharges, pdfOverride = undefined) => {
     setAssessmentCharges(updatedCharges);
     if (selectedApp) {
       const newTotal = updatedCharges.reduce((sum, c) => sum + (parseFloat(c.amount) || 0), 0);
+      const activePdf = pdfOverride !== undefined ? pdfOverride : assessmentPdfDoc;
       const updatedApp = { 
         ...selectedApp, 
         assessment_items: updatedCharges,
         assessmentItems: updatedCharges,
-        total_assessed: newTotal
+        total_assessed: newTotal,
+        assessment_pdf: activePdf,
+        assessmentPdf: activePdf
       };
       setSelectedApp(updatedApp);
       setApplications(prev => prev.map(a => a.referenceNo === selectedApp.referenceNo ? updatedApp : a));
@@ -788,10 +791,28 @@ INSTRUCTIONS FOR APPLICANT:
           ...r, 
           assessment_items: updatedCharges,
           assessmentItems: updatedCharges,
-          total_assessed: newTotal
+          total_assessed: newTotal,
+          assessment_pdf: activePdf,
+          assessmentPdf: activePdf
         } : r);
         localStorage.setItem('bplo_recent_applications', JSON.stringify(updatedRecents));
       } catch (e) {}
+
+      // Also sync to Supabase so the applicant sees the assessment in Application Tracker immediately
+      if (selectedApp.id && !String(selectedApp.id).startsWith('demo')) {
+        try {
+          await supabase
+            .from('bplo_application')
+            .update({
+              assessment_items: updatedCharges,
+              total_assessed: newTotal,
+              assessment_pdf: activePdf
+            })
+            .eq('id', selectedApp.id);
+        } catch (err) {
+          console.warn('Supabase assessment sync notice:', err);
+        }
+      }
     }
   };
 
@@ -864,7 +885,7 @@ INSTRUCTIONS FOR APPLICANT:
           sourcePdfName: pdfMetadata.fileName,
           sourcePdfUrl: idx === 0 ? pdfMetadata.url : undefined
         }));
-        persistCharges(chargesWithPdfRef);
+        persistCharges(chargesWithPdfRef, pdfMetadata);
         setToastMessage(
           `✓ Auto-extracted ${extractedCharges.length} itemized fees from "${file.name}" into Fee Description!`
         );
@@ -881,7 +902,7 @@ INSTRUCTIONS FOR APPLICANT:
             sourcePdfUrl: pdfMetadata.url
           }
         ];
-        persistCharges(fallbackRow);
+        persistCharges(fallbackRow, pdfMetadata);
         setShowAssessmentPdfPreview(true);
         setToastMessage(
           `Attached "${file.name}" to Fee Description. (Scanned PDF detected — review or edit amount directly.)`
